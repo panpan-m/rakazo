@@ -9,12 +9,43 @@ import {
   skillUpdateFromTool,
 } from "./skill-tools.js";
 
-type Scope = { spaceId?: string; userId?: string; OR?: Array<{ spaceId?: string }> };
+type Where = {
+  spaceId?: string;
+  userId?: string;
+  botId?: string | null;
+  allSpaces?: boolean;
+  allBots?: boolean;
+  assignments?: { some: { botId: string } };
+  availableIn?: { some?: { spaceId: string }; none?: Record<string, never> };
+  OR?: Where[];
+  AND?: Where[];
+};
 /** The owner's rows here: added in this space (no fixture is available beyond one). */
-function inScope(row: Record<string, unknown>, where: Scope): boolean {
+function matches(row: Record<string, unknown>, where: Where): boolean {
   if (where.userId && row.userId !== where.userId) return false;
   if (where.spaceId && row.spaceId !== where.spaceId) return false;
-  if (where.OR && !where.OR.some((branch) => branch.spaceId === row.spaceId)) return false;
+  if (where.botId !== undefined && (row.botId ?? null) !== where.botId) return false;
+  if (where.allSpaces !== undefined && Boolean(row.allSpaces ?? false) !== where.allSpaces) {
+    return false;
+  }
+  if (where.allBots !== undefined && Boolean(row.allBots ?? true) !== where.allBots) return false;
+  const assigned = (row.assignments ?? []) as Array<{ botId: string }>;
+  if (
+    where.assignments?.some &&
+    !assigned.some((entry) => entry.botId === where.assignments?.some.botId)
+  ) {
+    return false;
+  }
+  if (where.OR && !where.OR.some((branch) => matches(row, branch))) return false;
+  if (where.AND && !where.AND.every((branch) => matches(row, branch))) return false;
+  const spaces = (row.availableIn ?? []) as Array<{ spaceId: string }>;
+  if (
+    where.availableIn?.some &&
+    !spaces.some((entry) => entry.spaceId === where.availableIn?.some?.spaceId)
+  ) {
+    return false;
+  }
+  if (where.availableIn?.none && spaces.length > 0) return false;
   return true;
 }
 
@@ -22,11 +53,11 @@ function makePrisma(rows: Array<Record<string, unknown>> = []) {
   const store = [...rows];
   return {
     agentSkill: {
-      findMany: vi.fn(async ({ where }: { where?: Scope } = {}) =>
-        store.filter((row) => !where || inScope(row, where)).map((row) => ({ ...row })),
+      findMany: vi.fn(async ({ where }: { where?: Where } = {}) =>
+        store.filter((row) => !where || matches(row, where)).map((row) => ({ ...row })),
       ),
-      findFirst: vi.fn(async ({ where }: { where: Scope & { id: string } }) => {
-        const row = store.find((item) => item.id === where.id && inScope(item, where));
+      findFirst: vi.fn(async ({ where }: { where: Where & { id: string } }) => {
+        const row = store.find((item) => item.id === where.id && matches(item, where));
         return row ? { files: row.files ?? null } : null;
       }),
       create: vi.fn(async ({ data }: { data: Record<string, unknown> }) => {
@@ -35,6 +66,7 @@ function makePrisma(rows: Array<Record<string, unknown>> = []) {
           createdAt: new Date(),
           updatedAt: new Date(),
           source: "user",
+          botId: null,
           ...data,
         };
         store.push(row);
@@ -370,5 +402,118 @@ describe("skill tools", () => {
         newName: longName,
       }),
     ).toEqual({ error: "Skill name must be at most 80 characters." });
+  });
+});
+
+describe("bot-scoped skills", () => {
+  const botOwner = { spaceId: "ws-1", userId: "user-1", botId: "bot-1" };
+  const otherBot = { spaceId: "ws-1", userId: "user-1", botId: "bot-2" };
+
+  function spaceSkill(id: string, name: string, allBots: boolean, assigned: string[] = []) {
+    return {
+      id,
+      spaceId: "ws-1",
+      userId: "user-1",
+      botId: null,
+      name,
+      description: `desc ${name}`,
+      content: buildSkillMd({ name, description: `desc ${name}`, body: "space" }),
+      source: "user",
+      allBots,
+      assignments: assigned.map((botId) => ({ botId })),
+    };
+  }
+
+  function botSkill(id: string, name: string, botId: string) {
+    return {
+      id,
+      spaceId: "ws-1",
+      userId: "user-1",
+      botId,
+      name,
+      description: `desc ${name}`,
+      content: buildSkillMd({ name, description: `desc ${name}`, body: botId }),
+      source: "user",
+      allBots: true,
+      assignments: [],
+    };
+  }
+
+  it("shows a bot its own skills and granted space skills only", async () => {
+    const prisma = makePrisma([
+      spaceSkill("s-all", "For everyone", true),
+      spaceSkill("s-picked", "For picked bots", false, ["bot-1"]),
+      spaceSkill("s-other", "For the other bot", false, ["bot-2"]),
+      spaceSkill("s-none", "For no bot", false),
+      botSkill("b-mine", "Mine alone", "bot-1"),
+      botSkill("b-theirs", "Theirs alone", "bot-2"),
+    ]);
+    const names = (await listAgentSkillRecords(prisma as never, botOwner)).map((row) => row.name);
+    expect(names).toEqual(
+      expect.arrayContaining(["For everyone", "For picked bots", "Mine alone"]),
+    );
+    expect(names).not.toContain("For the other bot");
+    expect(names).not.toContain("For no bot");
+    expect(names).not.toContain("Theirs alone");
+  });
+
+  it("lets a bot's own skill shadow a same-named space skill", async () => {
+    const prisma = makePrisma([
+      spaceSkill("s-export", "export-report", true),
+      botSkill("b-export", "export-report", "bot-1"),
+    ]);
+    const records = await listAgentSkillRecords(prisma as never, botOwner);
+    const exports = records.filter((row) => row.name === "export-report");
+    expect(exports).toHaveLength(1);
+    expect(exports[0]).toMatchObject({ id: "b-export", botId: "bot-1" });
+    // Another bot still sees the space skill, not the shadowing one.
+    const others = await listAgentSkillRecords(prisma as never, otherBot);
+    expect(others.find((row) => row.name === "export-report")).toMatchObject({ id: "s-export" });
+  });
+
+  it("saves a bot's new skill as its own, invisible to other bots", async () => {
+    const prisma = makePrisma([]);
+    const created = await skillCreateFromTool(prisma as never, botOwner, {
+      name: "Learned trick",
+      description: "Picked up during a run",
+    });
+    expect(created).toMatchObject({ ok: true });
+    const row = prisma._store.find((item) => item.name === "Learned trick");
+    expect(row).toMatchObject({ botId: "bot-1" });
+    expect(await listAgentSkillRecords(prisma as never, otherBot)).not.toContainEqual(
+      expect.objectContaining({ name: "Learned trick" }),
+    );
+  });
+
+  it("lets a bot change only its own skills, never the space's", async () => {
+    const prisma = makePrisma([
+      spaceSkill("s-all", "Shared", true),
+      botSkill("b-mine", "Mine", "bot-1"),
+    ]);
+    expect(
+      await skillUpdateFromTool(prisma as never, botOwner, {
+        name: "Shared",
+        description: "hijack",
+      }),
+    ).toMatchObject({ error: expect.stringContaining("Only the user can change a space skill") });
+    expect(await skillDeleteFromTool(prisma as never, botOwner, { name: "Shared" })).toMatchObject({
+      error: expect.stringContaining("Only the user can change a space skill"),
+    });
+    expect(
+      await skillUpdateFromTool(prisma as never, botOwner, {
+        name: "Mine",
+        description: "own edit",
+      }),
+    ).toMatchObject({ ok: true });
+  });
+
+  it("keeps the user's own context able to change space skills", async () => {
+    const prisma = makePrisma([spaceSkill("s-all", "Shared", true)]);
+    expect(
+      await skillUpdateFromTool(prisma as never, owner, {
+        name: "Shared",
+        description: "user edit",
+      }),
+    ).toMatchObject({ ok: true });
   });
 });

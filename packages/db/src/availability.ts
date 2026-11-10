@@ -20,6 +20,27 @@ export function itemSecretIn(scope: { spaceId: string; userId: string }) {
   return { userId: scope.userId, OR: [{ spaceId: scope.spaceId }, { spaceId: null }] };
 }
 
+/**
+ * The agent skills one bot can use: its own skills (botId set to it) plus space skills
+ * visible in the space that are for every bot (allBots) or assigned to it. Callers dedupe
+ * by name with the bot's own skill winning, so a bot can shadow a space skill's name
+ * without other bots ever seeing the shadowing content.
+ */
+export function botVisibleSkillsWhere(scope: { spaceId: string; userId: string }, botId: string) {
+  return {
+    AND: [
+      availableInSpace(scope),
+      {
+        OR: [
+          { botId },
+          { botId: null, allBots: true },
+          { botId: null, assignments: { some: { botId } } },
+        ],
+      },
+    ],
+  };
+}
+
 /** Select alongside a row so `spaceAvailability` can describe it. */
 export const AVAILABILITY_SELECT = { select: { spaceId: true } } as const;
 

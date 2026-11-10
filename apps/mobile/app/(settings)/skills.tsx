@@ -41,6 +41,9 @@ export default function SkillsScreen() {
   const styles = useThemedStyles(createStyles);
   const { t } = useI18n();
   const skills = useQuery(rpcQuery("agentSkills/list"), queryClient);
+  // Only to name a bot-owned skill's owner in its row; skills themselves stay account-wide.
+  const bots = useQuery(rpcQuery("bots/list"), queryClient).data ?? [];
+  const botName = new Map(bots.map((bot) => [bot.id, bot.name]));
   const catalog = useQuery(rpcQuery("marketplace/catalog", { query: "" }), queryClient);
   const capabilities = useQuery(rpcQuery("capabilities/list"), queryClient);
   const [retrying, setRetrying] = useState(false);
@@ -160,6 +163,11 @@ export default function SkillsScreen() {
                 {skill.description ? (
                   <Text numberOfLines={1} style={styles.secondary}>
                     {skill.description}
+                  </Text>
+                ) : null}
+                {skill.owner?.kind === "bot" ? (
+                  <Text numberOfLines={1} style={styles.caption}>
+                    {t("Only {name}", { name: botName.get(skill.owner.botId) ?? "" })}
                   </Text>
                 ) : null}
               </View>
@@ -326,5 +334,6 @@ function createStyles() {
     grow: { flex: 1, gap: 2, minWidth: 0 },
     title: { color: native.label, fontSize: 15, fontWeight: "500" },
     secondary: { color: native.secondaryLabel, fontSize: 13 },
+    caption: { color: native.tertiaryLabel, fontSize: 12 },
   });
 }

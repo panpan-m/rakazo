@@ -2,7 +2,7 @@ import type { Actor } from "@rakazo/contracts";
 import { buildSkillMd, parseSkillMd } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
 import { describe, expect, it, vi } from "vitest";
-import { createAgentSkillsService, resolveSkillContent } from "./agent-skills.js";
+import { createAgentSkillsService, mapAgentSkill, resolveSkillContent } from "./agent-skills.js";
 
 const actor: Actor = {
   spaceId: "space-1",
@@ -16,6 +16,10 @@ function savedSkill(name: string, source = "user") {
     id: "saved-1",
     spaceId: actor.spaceId,
     userId: actor.userId,
+    botId: null,
+    allSpaces: false,
+    allBots: true,
+    assignments: [] as Array<{ botId: string }>,
     name,
     description: "Saved review recipe",
     content: buildSkillMd({ name, description: "Saved review recipe", body: "Saved steps" }),
@@ -151,5 +155,75 @@ Write the notes.
     expect(parsed.description).toBe("Prepare weekly release notes");
     expect(parsed.body).toBe("Write the weekly notes.");
     expect(parsed.frontmatter.notes).toBe("First step\nSecond step\n\n");
+  });
+});
+
+describe("skill ownership and per-bot catalog", () => {
+  it("maps space skills to owner and access, bot skills to owner alone", () => {
+    const space = savedSkill("Shared");
+    space.assignments = [{ botId: "bot-1" }];
+    space.allBots = false;
+    expect(mapAgentSkill(space)).toMatchObject({
+      owner: { kind: "space" },
+      access: { allBots: false, botIds: ["bot-1"] },
+    });
+    expect(mapAgentSkill({ ...savedSkill("Private"), botId: "bot-1" })).toMatchObject({
+      owner: { kind: "bot", botId: "bot-1" },
+      access: undefined,
+    });
+  });
+
+  it("serves a bot its own skill over a same-named space skill, then builtins", async () => {
+    const rows = [
+      { ...savedSkill("export-report"), id: "space-1" },
+      { ...savedSkill("export-report"), id: "bot-1-skill", botId: "bot-1" },
+    ];
+    type BotWhere = { id?: string; spaceId?: string };
+    const bot = {
+      findFirst: vi.fn(async ({ where }: { where: BotWhere }) =>
+        where.id === "bot-1" && where.spaceId === actor.spaceId ? { id: "bot-1" } : null,
+      ),
+    };
+    type SkillWhere = {
+      id?: string;
+      userId?: string;
+      botId?: string | null;
+      allBots?: boolean;
+      assignments?: { some: { botId: string } };
+      OR?: SkillWhere[];
+      AND?: SkillWhere[];
+    };
+    const matchesRow = (row: (typeof rows)[number], where: SkillWhere): boolean =>
+      Object.entries(where).every(([key, value]) => {
+        if (key === "OR") {
+          return (value as SkillWhere[]).some((branch) => matchesRow(row, branch));
+        }
+        if (key === "AND") {
+          return (value as SkillWhere[]).every((branch) => matchesRow(row, branch));
+        }
+        if (key === "assignments") {
+          const wanted = (value as { some: { botId: string } }).some.botId;
+          return row.assignments.some((entry) => entry.botId === wanted);
+        }
+        if (key === "botId") return (row.botId ?? null) === value;
+        if (key === "allBots") return row.allBots === value;
+        return row[key as keyof typeof row] === value;
+      });
+    const agentSkill = {
+      findMany: vi.fn(async ({ where }: { where: SkillWhere }) =>
+        rows.filter((row) => matchesRow(row, where)).map((row) => ({ ...row })),
+      ),
+      findFirst: vi.fn(async () => null),
+      updateMany: vi.fn(async () => ({ count: 0 })),
+      deleteMany: vi.fn(async () => ({ count: 0 })),
+    };
+    const service = createAgentSkillsService({
+      agentSkill,
+      bot,
+    } as unknown as PrismaClient);
+    const catalog = await service.forBot(actor, "bot-1");
+    const exported = catalog.filter((entry) => entry.name === "export-report");
+    expect(exported).toEqual([expect.objectContaining({ id: "bot-1-skill" })]);
+    expect(catalog.some((entry) => entry.id === "builtin:Interrogate")).toBe(true);
   });
 });

@@ -212,6 +212,8 @@ export const AccountExportRecordSchema = z.discriminatedUnion("type", [
     description: z.string(),
     content: z.string(),
     files: json.nullable(),
+    /** Present when the skill belongs to one bot alone. */
+    botId: Id.optional(),
     createdAt: IsoDate,
   }),
   /** Only in spaces the user owns. */

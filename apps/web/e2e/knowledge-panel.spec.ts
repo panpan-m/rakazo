@@ -174,7 +174,8 @@ test("memory and skills are readable and editable in the app", async ({ page }, 
   await expect(botDocEditor).toHaveValue(new RegExp(botMarker));
   await botMemory.getByRole("button", { name: "Cancel", exact: true }).click();
 
-  // Skills belong to the person in this space, so they open from the account menu, not bot settings.
+  // Skills belong to the person in this space, so the library opens from the account menu,
+  // not bot settings; the bot's settings only say which skills it can use.
   await expect(settings.getByTestId("bot-knowledge-skills")).toHaveCount(0);
   const openSkills = async () => {
     await page.getByTestId("user-menu-trigger").click();
@@ -213,6 +214,36 @@ test("memory and skills are readable and editable in the app", async ({ page }, 
     path: listedShot,
   });
   await closeSkills();
+
+  // The bot's settings keep their own Skills panel: the space's skills sit in a scrollable
+  // canvas of toggle cards, and a skill turned off here leaves the bot's catalog.
+  const botSkills = settings.getByTestId("bot-skills-section");
+  await expect(botSkills).toBeVisible();
+  const spaceCanvas = botSkills.getByTestId("bot-space-canvas");
+  await expect(spaceCanvas).toBeVisible();
+  const greetRow = spaceCanvas.getByTestId("bot-space-skill").filter({ hasText: "greet-politely" });
+  await expect(greetRow).toBeVisible();
+  await captureScreenshot(page, testInfo, "83-bot-skills-canvas");
+  const greetSwitch = greetRow.locator("[data-slot='switch']");
+  await greetSwitch.click();
+  await expect
+    .poll(async () => {
+      const entries = await rpc<
+        Array<{ name: string; access?: { allBots: boolean; botIds: string[] } }>
+      >(page, "agentSkills/list", {});
+      return entries.find((entry) => entry.name === "greet-politely")?.access;
+    })
+    .toEqual({ allBots: false, botIds: [] });
+  await greetSwitch.click();
+  await expect
+    .poll(async () => {
+      const entries = await rpc<
+        Array<{ name: string; access?: { allBots: boolean; botIds: string[] } }>
+      >(page, "agentSkills/list", {});
+      return entries.find((entry) => entry.name === "greet-politely")?.access;
+    })
+    .toEqual({ allBots: true, botIds: [] });
+
   const composer = page.getByRole("combobox", { name: /^Message/ });
   await composer.fill("/");
   await expect(

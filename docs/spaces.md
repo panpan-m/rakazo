@@ -19,7 +19,8 @@ Nothing crosses between spaces unless you allow it:
 - The Team Computer and every bot's [computer](./computer.md).
 - [App connections](./integrations.md).
 - [Saved credentials](./bot-secrets.md), when the space keeps its own.
-- Skills a bot saves.
+- Skills a bot saves. They stay that bot's own until you share them with the space; the space's
+  shared skills are listed in the [skills library](./skills.md).
 
 Bots only talk to bots in the same space, unless you turn on **Allow cross-space bot communication**
 in a bot's settings.

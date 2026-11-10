@@ -9,6 +9,7 @@ import { createRoot } from "react-dom/client";
 import { afterEach, expect, it, vi } from "vitest";
 
 const api = vi.hoisted(() => ({ list: vi.fn(), create: vi.fn(), get: vi.fn() }));
+const botsApi = vi.hoisted(() => ({ list: vi.fn(async () => []) }));
 const memoryApi = vi.hoisted(() => ({
   list: vi.fn(async () => []),
   remove: vi.fn(),
@@ -29,7 +30,7 @@ vi.mock("../components/integrations/space-availability", () => ({
 }));
 
 vi.mock("../lib/rpc", () => {
-  const client = { agentSkills: api, memory: memoryApi };
+  const client = { agentSkills: api, bots: botsApi, memory: memoryApi };
   return {
     rpc: client,
     rpcForSpace: () => client,
@@ -59,8 +60,16 @@ vi.mock("@rakazo/ui-web", () => {
     TabsTrigger: Container,
     TabsContent: Container,
     Badge: ({ children }: { children?: ReactNode }) => <span>{children}</span>,
+    BotAvatar: Container,
+    DropdownMenu: Container,
+    DropdownMenuContent: Container,
+    DropdownMenuItem: Container,
+    DropdownMenuTrigger: ({ children }: { children?: ReactNode }) => <>{children}</>,
   };
 });
+vi.mock("../components/integrations/agent-access", () => ({
+  AgentAccessControl: () => null,
+}));
 
 import { downloadArtifactBytes } from "../lib/artifact-open";
 import { spaceQueries } from "../lib/query";

@@ -132,6 +132,7 @@ import {
   ServerUpdateRunSchema,
   ServerUpdateStatusSchema,
   SignupSurveySchema,
+  SkillAccessSchema,
   SkillPlaybookSchema,
   SpaceInviteLinkSchema,
   SpaceInvitePreviewSchema,
@@ -1059,6 +1060,12 @@ export const appContract = {
     create: oc.input(CreateAgentSkillInput).output(AgentSkillSchema),
     update: oc.input(UpdateAgentSkillInput).output(AgentSkillSchema),
     remove: oc.input(z.object({ skillId: Id })).output(z.object({ ok: z.literal(true) })),
+    /** The catalog one bot actually sees: its own skills plus the space skills it may use. */
+    forBot: oc.input(z.object({ botId: Id })).output(z.array(AgentSkillCatalogEntrySchema)),
+    /** Set which bots a space skill is for; bot-owned skills have no access to set. */
+    setAccess: oc
+      .input(z.object({ skillId: Id }).and(SkillAccessSchema))
+      .output(AgentSkillCatalogEntrySchema),
   },
   availability: {
     set: oc

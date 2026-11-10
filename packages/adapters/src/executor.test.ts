@@ -2672,7 +2672,11 @@ description: Prepare standup notes
     expect(createdPrompt).not.toMatch(/@Daily standup/);
     // Routines run as their owner: only the owner's skills, and the claim names the owner.
     expect(prisma.agentSkill.findMany).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ userId: "user-1" }) }),
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([expect.objectContaining({ userId: "user-1" })]),
+        }),
+      }),
     );
     expect(claim).toHaveBeenCalledWith(
       expect.objectContaining({ where: expect.objectContaining({ userId: "user-1" }) }),

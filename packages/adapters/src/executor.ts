@@ -604,6 +604,7 @@ export function createRunExecutor(executorDeps: ExecutorDeps) {
           listAgentSkillRecords(deps.prisma, {
             spaceId: run.spaceId,
             userId: run.userId,
+            botId: run.botId,
           }),
           loadBotCommandEnvironment(deps.prisma, deps.secretStore, run),
           loadLoginPasswordRedactions(deps.prisma, deps.secretStore, run),

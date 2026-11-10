@@ -221,15 +221,20 @@ export function threadsRoutes(ctx: RouterContext) {
             routineTestTarget(deps.prisma, repos, actor, routineId),
           ),
         );
-        const skillRecords = await agentSkills.listWithContent(actor);
-        const routines = targets.map((target) => ({
-          target,
-          prompt: expandSkillReferencesInPrompt(target.routine.prompt, skillRecords),
-          nonce: routineTestRunNonce(
-            actor,
-            `routine-mention:${input.clientNonce}:${target.routine.id}`,
-          ),
-        }));
+        // @skill mentions expand against the catalog the routine's own bot sees.
+        const routines = await Promise.all(
+          targets.map(async (target) => ({
+            target,
+            prompt: expandSkillReferencesInPrompt(
+              target.routine.prompt,
+              await agentSkills.listWithContent(actor, target.botId),
+            ),
+            nonce: routineTestRunNonce(
+              actor,
+              `routine-mention:${input.clientNonce}:${target.routine.id}`,
+            ),
+          })),
+        );
         const nonces = routines.map((routine) => routine.nonce);
         const savedRuns = (db: Pick<Prisma.TransactionClient, "run">) =>
           db.run.findMany({

@@ -51,6 +51,10 @@ const KnowledgeSection = lazyComponent(() =>
   import("../KnowledgeSection").then((module) => module.KnowledgeSection),
 );
 
+const BotSkillsSection = lazyComponent(() =>
+  import("./bot-skills-section").then((module) => module.BotSkillsSection),
+);
+
 /** The advanced fields one Save sends, in the order their saved snapshot keeps them. */
 function advancedValues(bot: Bot) {
   return [
@@ -569,6 +573,11 @@ export function BotSettings({
           <ErrorBoundary fallback={<SectionLoadFailed />}>
             <Suspense fallback={null}>
               <KnowledgeSection botId={bot.id} />
+            </Suspense>
+          </ErrorBoundary>
+          <ErrorBoundary fallback={<SectionLoadFailed />}>
+            <Suspense fallback={null}>
+              <BotSkillsSection botId={bot.id} />
             </Suspense>
           </ErrorBoundary>
           <div className="space-y-6 pt-6">

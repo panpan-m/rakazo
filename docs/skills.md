@@ -25,11 +25,25 @@ then **Preview** and **Add**.
 > [!NOTE]
 > Skills added from GitHub or a plugin are instructions only. Any scripts they include are not run.
 
+## Space skills and a bot's own
+
+A skill belongs to the space or to one bot.
+
+- **Space skills** (what you add yourself) are shared: every bot in the space can use them. Open a
+  skill and choose the bots next to it to narrow it to some of them, and **To bot** to hand the
+  skill to one bot alone.
+- **A bot's own skills** belong to that bot only. No other bot sees them, even in the same space.
+  In the bot's settings under **Skills** you can write one for it, choose which space skills it may
+  use, and **Share with space** to turn one of its own into a shared skill.
+
+A bot's own skill with the same name as a space skill replaces that skill for the bot alone; the
+space skill keeps working for every other bot. Bots cannot change space skills — only you can.
+
 ## Bots save skills too
 
-After a multi-step task, ask the bot to "save that as a skill". It writes the skill so it, and your
-other bots, can repeat the task next time. A skill a bot saves stays in the [space](./spaces.md) it
-was made in.
+After a multi-step task, ask the bot to "save that as a skill". It writes the skill as its own so
+it can repeat the task next time; your other bots are unaffected until you share it. A skill a bot
+saves stays in the [space](./spaces.md) it was made in.
 
 ## Teach a task by showing it
 

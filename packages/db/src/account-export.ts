@@ -441,6 +441,8 @@ async function* spaceRecords(
       description: skill.description,
       content: skill.content,
       files: json(skill.files),
+      // A bot's own skill stays its own; bots are exported before skills, so imports can map it.
+      ...(skill.botId ? { botId: skill.botId } : {}),
       createdAt: iso(skill.createdAt),
     };
 

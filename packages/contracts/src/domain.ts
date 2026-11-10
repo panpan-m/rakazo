@@ -741,6 +741,20 @@ export const AccountItemSchema = z.object({
 });
 export type AccountItem = z.infer<typeof AccountItemSchema>;
 
+/** Who a skill belongs to: the space's shared library, or one bot alone. */
+export const SkillOwnerSchema = z.discriminatedUnion("kind", [
+  z.object({ kind: z.literal("space") }),
+  z.object({ kind: z.literal("bot"), botId: Id }),
+]);
+export type SkillOwner = z.infer<typeof SkillOwnerSchema>;
+
+/** Which bots a space skill is for: every one of them, or only the listed ones. */
+export const SkillAccessSchema = z.object({
+  allBots: z.boolean(),
+  botIds: z.array(Id),
+});
+export type SkillAccess = z.infer<typeof SkillAccessSchema>;
+
 export const AgentSkillSchema = z.object({
   id: Id,
   name: z.string(),
@@ -750,6 +764,10 @@ export const AgentSkillSchema = z.object({
   readOnly: z.boolean(),
   /** Absent for built-in skills, which every space has. */
   availability: SpaceAvailabilitySchema.optional(),
+  /** Absent for built-in skills; bot skills are invisible to every other bot. */
+  owner: SkillOwnerSchema.optional(),
+  /** Space skills only: absent while the skill belongs to one bot. */
+  access: SkillAccessSchema.optional(),
   createdAt: z.string(),
   updatedAt: z.string(),
 });
@@ -762,6 +780,8 @@ export const AgentSkillCatalogEntrySchema = AgentSkillSchema.pick({
   source: true,
   readOnly: true,
   availability: true,
+  owner: true,
+  access: true,
 });
 export type AgentSkillCatalogEntry = z.infer<typeof AgentSkillCatalogEntrySchema>;
 
@@ -771,6 +791,8 @@ export const CreateAgentSkillInput = z
     name: z.string().min(1).max(80).optional(),
     description: z.string().min(1).max(2000).optional(),
     body: z.string().max(100_000).optional(),
+    /** Create as this bot's own skill instead of a space skill. */
+    botId: Id.optional(),
   })
   .superRefine((input, ctx) => {
     if (input.content?.trim()) return;
@@ -790,6 +812,8 @@ export const UpdateAgentSkillInput = z
     name: z.string().min(1).max(80).optional(),
     description: z.string().min(1).max(2000).optional(),
     body: z.string().max(100_000).optional(),
+    /** Move the skill to this bot (a bot id) or back to the space (null). */
+    botId: Id.nullable().optional(),
   })
   .superRefine((input, ctx) => {
     if (

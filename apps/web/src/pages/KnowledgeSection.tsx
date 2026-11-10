@@ -1,13 +1,30 @@
 import { Trans, useLingui } from "@lingui/react/macro";
 import { ORPCError } from "@orpc/client";
-import type { AgentSkill, AgentSkillCatalogEntry, MemoryDocument } from "@rakazo/contracts";
+import type {
+  AgentSkill,
+  AgentSkillCatalogEntry,
+  BotAvatarSet,
+  MemoryDocument,
+} from "@rakazo/contracts";
 import { isDeletableMemoryDocument, isEmptyBotMemory } from "@rakazo/contracts";
 import { fetchFresh, writeSaved } from "@rakazo/core/query";
-import { Badge, Button, SectionHeading, Skeleton, Textarea } from "@rakazo/ui-web";
+import {
+  Badge,
+  BotAvatar,
+  Button,
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+  SectionHeading,
+  Skeleton,
+  Textarea,
+} from "@rakazo/ui-web";
 import { Tooltip, TooltipContent, TooltipTrigger } from "@rakazo/ui-web/components/ui/tooltip";
 import { skipToken, useQuery, useQueryClient } from "@tanstack/react-query";
-import { Download, Plus } from "lucide-react";
-import { useEffect, useRef, useState } from "react";
+import { ChevronDown, Download, Plus } from "lucide-react";
+import { useEffect, useMemo, useRef, useState } from "react";
+import { AgentAccessControl } from "../components/integrations/agent-access";
 import {
   AvailabilityControl,
   AvailabilityLabel,
@@ -28,8 +45,8 @@ function rowClass(open: boolean): string {
 }
 
 /**
- * Bot memory. Skills belong to the person in a space, not to one bot, so they live in
- * the Skills dialog; memory shared across bots lives in the Memory settings overlay.
+ * Bot memory. Skills live in the Skills dialog — the space's shared ones and each bot's
+ * own; memory shared across bots lives in the Memory settings overlay.
  */
 export function KnowledgeSection({ botId }: { botId: string }) {
   return (
@@ -328,7 +345,7 @@ function SkillSourceBadge({ source }: { source: AgentSkillCatalogEntry["source"]
   );
 }
 
-const NEW_SKILL_TEMPLATE = `---
+export const NEW_SKILL_TEMPLATE = `---
 name: my-skill
 description: What this skill does and when the agent should use it.
 ---
@@ -356,6 +373,21 @@ export function AgentSkills() {
   const [confirmingDelete, setConfirmingDelete] = useState(false);
   const selection = useRef(0);
   const spaceCount = useOwnSpaces().length;
+  const botsQuery = useQuery(queries.bots.list.queryOptions());
+  const bots = useMemo(
+    () => (botsQuery.data ?? []).filter((bot) => !bot.archivedAt),
+    [botsQuery.data],
+  );
+  const botName = useMemo(() => new Map(bots.map((bot) => [bot.id, bot.name])), [bots]);
+  // A space skill a bot shadows with its own same-named one: the row says so, no badge needed.
+  const shadowedBy = useMemo(() => {
+    const owners = new Map<string, string>();
+    for (const skill of skills) {
+      if (skill.owner?.kind === "bot")
+        owners.set(skill.name.trim().toLowerCase(), skill.owner.botId);
+    }
+    return owners;
+  }, [skills]);
 
   async function refresh() {
     return fetchFresh(queryClient, list);
@@ -438,6 +470,48 @@ export function AgentSkills() {
     }
   }
 
+  async function setSkillAccess(skillId: string, allBots: boolean, botIds: string[]) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await rpc.agentSkills.setAccess({ skillId, allBots, botIds });
+      if (open) setOpen(await rpc.agentSkills.get({ skillId: open.id }));
+      try {
+        await refresh();
+      } catch {
+        setError(t`Could not load`);
+      }
+    } catch {
+      setError(t`Could not save skill access`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function moveSkill(skillId: string, botId: string | null) {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await rpc.agentSkills.update({ skillId, botId });
+      const here = (await refresh()).some((entry) => entry.id === skillId);
+      if (open?.id === skillId) {
+        if (!here) {
+          selection.current += 1;
+          setOpen(null);
+        } else {
+          setOpen(await rpc.agentSkills.get({ skillId }));
+        }
+      }
+    } catch {
+      // The name already exists where the skill is going; the caller's menu stays open to retry.
+      setError(t`A skill with that name already exists`);
+    } finally {
+      setBusy(false);
+    }
+  }
+
   const editorOpen = creating || open;
   return (
     <div data-testid="bot-knowledge-skills">
@@ -470,38 +544,79 @@ export function AgentSkills() {
               <span className="mt-0.5 block truncate text-body-sm text-muted-foreground" dir="auto">
                 {entry.description}
               </span>
+              <SkillOwnerNote
+                entry={entry}
+                botName={botName}
+                shadowBotId={shadowedBy.get(entry.name.trim().toLowerCase())}
+              />
             </Button>
           ))
         : null}
       {editorOpen ? (
         <div className="pb-2">
           {open ? (
-            <div className="flex min-h-7 items-center gap-2">
+            <div className="flex min-h-7 flex-wrap items-center gap-2">
               <div className="min-w-0 truncate text-body font-normal text-foreground" dir="auto">
                 {open.name}
               </div>
               <SkillSourceBadge source={open.source} />
+              {open.owner?.kind === "bot" ? (
+                <span className="text-caption text-muted-foreground">
+                  <Trans>Only {botName.get(open.owner.botId) ?? "this bot"}</Trans>
+                </span>
+              ) : null}
+              {open.source === "user" && open.owner?.kind === "bot" ? (
+                <Button
+                  variant="ghost"
+                  size="sm"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => void moveSkill(open.id, null)}
+                  className="h-7 px-2 text-label font-normal"
+                >
+                  <Trans>Share with space</Trans>
+                </Button>
+              ) : null}
               {open.source === "user" ? (
-                <div className="ms-auto">
-                  <AvailabilityControl
-                    kind="skill"
-                    id={open.id}
-                    availability={open.availability}
-                    onChanged={async () => {
-                      // Another skill may have been opened while this was saving; leave it alone.
-                      const opened = selection.current;
-                      // Narrowed away from this space, the skill can no longer be read here.
-                      const here = (await refresh()).some((entry) => entry.id === open.id);
-                      if (selection.current !== opened) return;
-                      if (!here) {
-                        selection.current += 1;
-                        setOpen(null);
-                        return;
-                      }
-                      const fresh = await rpc.agentSkills.get({ skillId: open.id });
-                      if (selection.current === opened) setOpen(fresh);
-                    }}
-                  />
+                <div className="ms-auto flex items-center gap-2">
+                  {open.owner?.kind !== "bot" ? (
+                    <>
+                      {open.access ? (
+                        <AgentAccessControl
+                          bots={bots}
+                          access={open.access}
+                          disabled={busy}
+                          onChange={(next) =>
+                            void setSkillAccess(open.id, next.allBots, next.botIds)
+                          }
+                        />
+                      ) : null}
+                      <MoveToBotMenu
+                        bots={bots}
+                        disabled={busy}
+                        onPick={(botId) => void moveSkill(open.id, botId)}
+                      />
+                      <AvailabilityControl
+                        kind="skill"
+                        id={open.id}
+                        availability={open.availability}
+                        onChanged={async () => {
+                          // Another skill may have been opened while this was saving; leave it alone.
+                          const opened = selection.current;
+                          // Narrowed away from this space, the skill can no longer be read here.
+                          const here = (await refresh()).some((entry) => entry.id === open.id);
+                          if (selection.current !== opened) return;
+                          if (!here) {
+                            selection.current += 1;
+                            setOpen(null);
+                            return;
+                          }
+                          const fresh = await rpc.agentSkills.get({ skillId: open.id });
+                          if (selection.current === opened) setOpen(fresh);
+                        }}
+                      />
+                    </>
+                  ) : null}
                 </div>
               ) : null}
             </div>
@@ -585,5 +700,72 @@ export function AgentSkills() {
         </Button>
       )}
     </div>
+  );
+}
+
+/** The one-line truth under a skill row: whose it is, and who shadows it. */
+function SkillOwnerNote({
+  entry,
+  botName,
+  shadowBotId,
+}: {
+  entry: AgentSkillCatalogEntry;
+  botName: Map<string, string>;
+  shadowBotId?: string;
+}) {
+  if (entry.source !== "user") return null;
+  if (entry.owner?.kind === "bot") {
+    return (
+      <span className="mt-0.5 block truncate text-caption text-muted-foreground">
+        <Trans>Only {botName.get(entry.owner.botId) ?? "this bot"}</Trans>
+      </span>
+    );
+  }
+  if (shadowBotId) {
+    return (
+      <span className="mt-0.5 block truncate text-caption text-muted-foreground">
+        <Trans>{botName.get(shadowBotId) ?? "A bot"} keeps its own skill with this name</Trans>
+      </span>
+    );
+  }
+  return null;
+}
+
+/** Give a space skill to one bot alone, out of the list of the space's bots. */
+function MoveToBotMenu({
+  bots,
+  disabled,
+  onPick,
+}: {
+  bots: Array<{ id: string; name: string; color: string; avatarSet?: BotAvatarSet }>;
+  disabled?: boolean;
+  onPick: (botId: string) => void;
+}) {
+  const { t } = useLingui();
+  if (bots.length === 0) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        render={
+          <Button
+            variant="ghost"
+            size="sm"
+            disabled={disabled}
+            className="h-7 gap-1 px-1.5 text-label font-normal text-foreground"
+          />
+        }
+      >
+        <Trans>To bot</Trans>
+        <ChevronDown className="size-3.5 text-muted-foreground" aria-label={t`Move to bot`} />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-56">
+        {bots.map((bot) => (
+          <DropdownMenuItem key={bot.id} onSelect={() => onPick(bot.id)}>
+            <BotAvatar color={bot.color} avatarSet={bot.avatarSet} identity={bot.id} size={18} />
+            {bot.name}
+          </DropdownMenuItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
   );
 }

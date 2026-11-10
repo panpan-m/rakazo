@@ -274,8 +274,13 @@ describe("skills in a shared space", () => {
   it("lists only the run user's own agent skills", async () => {
     const { agentSkillQuery } = await runInSpace({ members: 2, authors: true });
 
+    // The bot-scoped catalog keeps the owner filter, now nested inside its AND clause.
     expect(agentSkillQuery).toHaveBeenCalledWith(
-      expect.objectContaining({ where: expect.objectContaining({ userId: "user-b" }) }),
+      expect.objectContaining({
+        where: expect.objectContaining({
+          AND: expect.arrayContaining([expect.objectContaining({ userId: "user-b" })]),
+        }),
+      }),
     );
   });
 

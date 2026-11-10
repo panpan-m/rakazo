@@ -7,7 +7,7 @@ import {
   parseSkillMd,
 } from "@rakazo/core";
 import type { PrismaClient } from "@rakazo/db";
-import { availableInSpace } from "@rakazo/db";
+import { availableInSpace, botVisibleSkillsWhere } from "@rakazo/db";
 import { BUILTIN_AGENT_SKILLS } from "./builtin-skills.js";
 
 export const SKILL_TOOL_NAMES = new Set([
@@ -25,25 +25,31 @@ const MAX_SKILL_DESCRIPTION_CHARS = 2000;
 type SkillOwner = {
   spaceId: string;
   userId: string;
+  /** The bot whose run is asking: it sees its own skills plus the space skills granted to it. */
+  botId?: string;
 };
 
 type AgentSkillRow = {
   id: string;
+  botId: string | null;
   name: string;
   description: string;
   content: string;
   source: string;
 };
 
+export type AgentSkillRecord = SkillRecord & { id: string; botId: string | null };
+
 function asSource(value: string): SkillSource {
   if (value === "builtin" || value === "plugin" || value === "user") return value;
   return "user";
 }
 
-function toRecord(row: AgentSkillRow): SkillRecord & { id: string } {
+function toRecord(row: AgentSkillRow): AgentSkillRecord {
   const source = asSource(row.source);
   return {
     id: row.id,
+    botId: row.botId,
     name: row.name,
     description: row.description,
     content: row.content,
@@ -52,9 +58,10 @@ function toRecord(row: AgentSkillRow): SkillRecord & { id: string } {
   };
 }
 
-export function builtinAgentSkillRecords(): Array<SkillRecord & { id: string }> {
+export function builtinAgentSkillRecords(): AgentSkillRecord[] {
   return BUILTIN_AGENT_SKILLS.map((skill) => ({
     id: `builtin:${skill.name}`,
+    botId: null,
     name: skill.name,
     description: skill.description,
     content: skill.content,
@@ -84,12 +91,14 @@ function rejectInvalidSkillFields(name: string, description: string): string | u
 
 /**
  * A bot changes only skills that live in its own space alone: writing this space's details into
- * a skill other spaces read would carry them across the boundary.
+ * a skill other spaces read would carry them across the boundary. A bot in a run also cannot
+ * touch anything but its own skills, so a misled model cannot rewrite shared ones.
  */
 function onlyInSpace(owner: SkillOwner) {
   return {
     spaceId: owner.spaceId,
     userId: owner.userId,
+    ...(owner.botId ? { botId: owner.botId } : {}),
     allSpaces: false,
     availableIn: { none: {} },
   };
@@ -98,24 +107,41 @@ function onlyInSpace(owner: SkillOwner) {
 const SHARED_SKILL_ERROR =
   "Could not change this skill. A skill available in other spaces can only be changed by the user.";
 
+const SPACE_SKILL_BOT_ERROR =
+  "Only the user can change a space skill. Save your version under a new name instead.";
+
 export async function listAgentSkillRecords(
   prisma: PrismaClient,
   owner: SkillOwner,
-): Promise<Array<SkillRecord & { id: string }>> {
+): Promise<AgentSkillRecord[]> {
   const rows = await prisma.agentSkill.findMany({
-    where: availableInSpace(owner),
+    where: owner.botId ? botVisibleSkillsWhere(owner, owner.botId) : availableInSpace(owner),
     // Reference files are read one at a time through skill_read, never with the catalog.
     omit: { files: true },
     orderBy: [{ name: "asc" }, { id: "asc" }],
   });
-  return mergeBuiltinSkills(builtinAgentSkillRecords(), rows.map(toRecord));
+  // The bot's own skill wins a shared name, so its catalog never mixes two same-named skills.
+  const visible = owner.botId ? preferOwnOnNameClash(rows) : rows;
+  return mergeBuiltinSkills(builtinAgentSkillRecords(), visible.map(toRecord));
+}
+
+/** Same-named rows collapse to the one the bot itself owns; other bots' rows never reach here. */
+function preferOwnOnNameClash(rows: AgentSkillRow[]): AgentSkillRow[] {
+  const seen = new Set<string>();
+  const preferred = [...rows].sort((a, b) => Number(b.botId !== null) - Number(a.botId !== null));
+  return preferred.filter((row) => {
+    const key = row.name.trim().toLowerCase();
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
 }
 
 async function findOwnedSkill(
   prisma: PrismaClient,
   owner: SkillOwner,
   input: { skillId?: string; name?: string },
-): Promise<(SkillRecord & { id: string }) | null> {
+): Promise<AgentSkillRecord | null> {
   const skills = await listAgentSkillRecords(prisma, owner);
   if (input.skillId) {
     return skills.find((skill) => skill.id === input.skillId) ?? null;
@@ -205,6 +231,8 @@ export async function skillCreateFromTool(
       data: {
         spaceId: owner.spaceId,
         userId: owner.userId,
+        // A bot saves skills as its own, so they never reach the other bots of the space.
+        ...(owner.botId ? { botId: owner.botId, allSpaces: false } : {}),
         name,
         description,
         content,
@@ -242,6 +270,9 @@ export async function skillUpdateFromTool(
   if (!existing) return { error: "Skill not found." };
   if (existing.readOnly || existing.source !== "user" || existing.id.startsWith("builtin:")) {
     return { error: "Builtin and plugin skills are read-only." };
+  }
+  if (owner.botId && existing.botId !== owner.botId) {
+    return { error: SPACE_SKILL_BOT_ERROR };
   }
 
   let nextContent = existing.content;
@@ -310,6 +341,9 @@ export async function skillDeleteFromTool(
   if (!existing) return { error: "Skill not found." };
   if (existing.readOnly || existing.source !== "user" || existing.id.startsWith("builtin:")) {
     return { error: "Builtin and plugin skills are read-only." };
+  }
+  if (owner.botId && existing.botId !== owner.botId) {
+    return { error: SPACE_SKILL_BOT_ERROR };
   }
   const deleted = await prisma.agentSkill.deleteMany({
     where: { id: existing.id, ...onlyInSpace(owner), source: "user" },

@@ -657,6 +657,7 @@ model Space {
   tickets                     Ticket[]
   ticketComments              TicketComment[]
   agentSkillSpaces            AgentSkillSpace[]
+  agentSkillBots              AgentSkillBot[]
   mcpServerSpaces             McpServerSpace[]
   capabilityInstallSpaces     CapabilityInstallSpace[]
 
@@ -988,6 +989,8 @@ model Bot {
   runs              Run[]
   steeringMessages  SteeringMessage[]
   mcpServers        BotMcpServer[]
+  agentSkills       AgentSkill[]
+  skillAssignments  AgentSkillBot[]
   agentImports      AgentImport[]
   groupMembers      ChatGroupMember[]
   botSecrets BotSecret[]
@@ -1636,6 +1639,10 @@ model AgentSkill {
   spaceId     String
   space       Space    @relation(fields: [spaceId], references: [id], onDelete: Cascade)
   userId      String
+  /// Null: a space skill shared with the space's bots (see allBots/assignments). Set: this
+  /// bot's own skill, invisible to every other bot, whatever their computer or membership.
+  botId       String?
+  bot         Bot?     @relation(fields: [botId], references: [id], onDelete: Cascade)
   name        String
   description String
   content     String
@@ -1646,15 +1653,38 @@ model AgentSkill {
   installId   String?
   install     CapabilityInstall? @relation(fields: [installId], references: [id], onDelete: Cascade)
   /// Available in every space of its owner, including later ones; otherwise in spaceId and availableIn.
+  /// Space availability applies to space skills only; a bot skill never leaves its bot's space.
   allSpaces   Boolean  @default(false)
   availableIn AgentSkillSpace[]
+  /// Space skills only: every bot in a visible space can use it; otherwise only assigned bots.
+  allBots     Boolean  @default(true)
+  assignments AgentSkillBot[]
   createdAt   DateTime @default(now())
   updatedAt   DateTime @updatedAt
 
   @@index([spaceId, userId])
+  @@index([botId])
   @@index([installId])
   // Case-insensitive unique index agent_skills_spaceId_userId_name_lower_key is created in SQL.
   @@map("agent_skills")
+}
+
+/// One bot's grant of one space skill, mirroring BotMcpServer. Rows exist only while the
+/// skill has allBots = false; deleting them or flipping allBots restores every-bot access.
+model AgentSkillBot {
+  id        String      @id @default(cuid())
+  spaceId   String
+  space     Space       @relation(fields: [spaceId], references: [id], onDelete: Cascade)
+  skillId   String
+  skill     AgentSkill  @relation(fields: [skillId], references: [id], onDelete: Cascade)
+  botId     String
+  bot       Bot         @relation(fields: [botId], references: [id], onDelete: Cascade)
+  userId    String
+  createdAt DateTime    @default(now())
+
+  @@unique([skillId, botId])
+  @@index([spaceId, userId, botId])
+  @@map("agent_skill_bots")
 }
 
 model Connection {

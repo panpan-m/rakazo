@@ -818,6 +818,11 @@ class AccountImporter implements ArchiveSink {
             files: jsonValue(record.files),
             source: "user",
             allSpaces: false,
+            // Bots are imported before skills, so a bot's own skill finds its bot again;
+            // an unknown bot degrades the skill to the space's instead of failing the import.
+            ...(record.botId && space.ids.has(record.botId)
+              ? { botId: space.ids.get(record.botId) }
+              : {}),
             createdAt: new Date(record.createdAt),
           },
         });
