@@ -1,9 +1,27 @@
 import { describe, expect, it } from "vitest";
+import { MEMORY_PROVIDER_SETTINGS, memoryProviderSettings } from "./registry";
 import {
   SERENITY_ENDPOINT_PLACEHOLDER,
   serenityConnectionDraft,
   serenityEndpointError,
 } from "./serenity-settings";
+
+describe("memory provider registry", () => {
+  it("registers Hindsight with a settings form and self-hosted label", () => {
+    const registration = memoryProviderSettings("hindsight");
+    expect(registration?.name).toBe("Hindsight");
+    expect(registration?.SettingsForm).toBeTruthy();
+    expect(
+      registration?.connectedLabel({
+        provider: "hindsight",
+        settings: { baseUrl: "http://localhost:8888" },
+        defaultMemoryScope: "isolated",
+        updatedAt: "2026-01-01T00:00:00.000Z",
+      }),
+    ).toBe("Self-hosted (http://localhost:8888)");
+    expect(MEMORY_PROVIDER_SETTINGS.some((entry) => entry.id === "hindsight")).toBe(true);
+  });
+});
 
 describe("Serenity memory provider settings", () => {
   it("requires an explicit endpoint and leaves URL validity to the backend", () => {

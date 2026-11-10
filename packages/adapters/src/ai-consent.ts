@@ -52,6 +52,7 @@ function recipientName(provider: string, use: AiDataUse) {
   if (use === "memory") {
     if (provider === "supermemory") return "Supermemory";
     if (provider === "honcho") return "Honcho";
+    if (provider === "hindsight") return "Hindsight";
     return provider;
   }
   if (provider === "cursor") return "Cursor";

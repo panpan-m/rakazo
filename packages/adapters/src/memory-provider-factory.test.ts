@@ -61,6 +61,26 @@ describe("SpaceMemoryProviderResolver", () => {
     },
   );
 
+  it("resolves a configured public Hindsight endpoint into its provider", async () => {
+    const { resolver } = resolverFor(JSON.stringify({ token: "hs_test_token" }), {
+      provider: "hindsight",
+      baseUrl: "https://memory.example.com",
+    });
+    const configured = await resolver.resolve("workspace-1");
+    expect(configured?.provider.describe().id).toBe("hindsight");
+    expect(configured?.defaultScope).toBe("shared");
+  });
+
+  it("disables a loopback Hindsight endpoint without loading its credentials", async () => {
+    const { resolver, secrets } = resolverFor(JSON.stringify({}), {
+      provider: "hindsight",
+      baseUrl: "http://127.0.0.1:8888",
+      allowPrivateEndpoint: false,
+    });
+    await expect(resolver.resolve("workspace-1")).resolves.toBeNull();
+    expect(secrets.load).not.toHaveBeenCalled();
+  });
+
   it("gates and revalidates saved local Honcho endpoints like other local providers", async () => {
     const fetchMock = vi.fn();
     vi.stubGlobal("fetch", fetchMock);

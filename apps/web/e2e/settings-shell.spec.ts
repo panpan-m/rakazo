@@ -259,3 +259,25 @@ test("Honcho memory settings empty and filled", async ({ page }, testInfo) => {
   await expect(documents).toBeVisible();
   await captureScreenshot(page, testInfo, "memory-dark-bottom");
 });
+
+test("Hindsight memory settings empty and filled", async ({ page }, testInfo) => {
+  // These screenshots never submit credentials or contact the memory server.
+  const stamp = Date.now();
+  await signup(page, `memory-hindsight-${stamp}@rakazo.test`, "password12", "Memory settings");
+  await completeOnboarding(page);
+  const settings = await openUserSettings(page, "memory");
+  const memory = settings.getByTestId("memory-settings");
+  await memory.getByRole("button", { name: "Connect memory provider", exact: true }).click();
+  await memory.getByLabel("Provider").selectOption("hindsight");
+  await expect(memory.getByLabel("Base URL", { exact: true })).toBeVisible();
+  await expect(memory.getByLabel("Access token", { exact: true })).toBeVisible();
+  await expect(memory.getByRole("button", { name: "Connect", exact: true })).toBeDisabled();
+  await page.setViewportSize({ width: 1280, height: 900 });
+  await captureScreenshot(page, testInfo, "memory-hindsight-empty");
+  await memory.getByLabel("Base URL", { exact: true }).fill("not a url");
+  await expect(memory.getByText("Enter an http(s) URL without credentials.")).toBeVisible();
+  await expect(memory.getByRole("button", { name: "Connect", exact: true })).toBeDisabled();
+  await memory.getByLabel("Base URL", { exact: true }).fill("http://localhost:8888");
+  await expect(memory.getByRole("button", { name: "Connect", exact: true })).toBeEnabled();
+  await captureScreenshot(page, testInfo, "memory-hindsight-filled");
+});

@@ -1,6 +1,14 @@
 import type { DurableMemoryScope, SecretStore, SemanticMemoryProvider } from "@rakazo/adapter-kit";
 import type { PrismaClient } from "@rakazo/db";
 import { getLogger } from "@rakazo/logging";
+import type { HindsightNetworkDependencies } from "./hindsight-client.js";
+import {
+  classifyHindsightConnectionSettings,
+  createHindsightProvider,
+  HINDSIGHT_PROVIDER_ID,
+  hindsightRequiresPrivateEndpoint,
+  prepareHindsightConnection,
+} from "./hindsight-memory-provider.js";
 import {
   createHonchoProvider,
   HONCHO_PROVIDER_ID,
@@ -98,6 +106,25 @@ const MEMORY_PROVIDER_ADAPTERS: ReadonlyMap<string, MemoryProviderAdapter> = new
       revalidate: revalidateLocalServiceSettings,
       prepare: prepareHonchoConnection,
       create: createHonchoProvider,
+    },
+  ],
+  [
+    HINDSIGHT_PROVIDER_ID,
+    {
+      requiresPrivateEndpoint: hindsightRequiresPrivateEndpoint,
+      classifySettings: classifyHindsightConnectionSettings,
+      prepare: (
+        settings: Record<string, string>,
+        credentials: Record<string, string>,
+        options?: { allowPrivateEndpoint?: boolean },
+      ) =>
+        prepareHindsightConnection(
+          settings,
+          credentials,
+          undefined as HindsightNetworkDependencies | undefined,
+          options,
+        ),
+      create: createHindsightProvider,
     },
   ],
 ]);
