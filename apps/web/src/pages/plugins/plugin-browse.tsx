@@ -432,9 +432,13 @@ export function PluginBrowse({
       <TabsList data-testid="marketplace-sheets" className="mb-4">
         <TabsTrigger value="apps" className="px-3">
           <Trans>Apps</Trans>
+          <span className="font-normal text-muted-foreground tabular-nums">{plugins.length}</span>
         </TabsTrigger>
         <TabsTrigger value="skills" className="px-3">
           <Trans>Skills</Trans>
+          <span className="font-normal text-muted-foreground tabular-nums">
+            {skillPacks.length}
+          </span>
         </TabsTrigger>
       </TabsList>
       <TabsContent value="apps">{appsContent}</TabsContent>
