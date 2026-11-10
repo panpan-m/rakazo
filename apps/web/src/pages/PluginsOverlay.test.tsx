@@ -291,8 +291,13 @@ it("keeps skill packs on their own sheet, connectors on Apps", async () => {
   await vi.waitFor(() => expect(host.textContent).toContain("Aave"));
 
   const sheets = [...host.querySelectorAll("button")];
-  const skillsSheet = sheets.find((button) => button.textContent === "Skills");
+  const skillsSheet = sheets.find((button) => button.textContent?.startsWith("Skills"));
   expect(skillsSheet).toBeDefined();
+  // Each sheet says how many entries it holds.
+  expect(skillsSheet?.textContent).toContain("1");
+  expect(sheets.find((button) => button.textContent?.startsWith("Apps"))?.textContent).toContain(
+    "1",
+  );
   expect(host.textContent).not.toContain("Pdf Skills");
 
   await act(async () => skillsSheet?.click());
