@@ -124,11 +124,19 @@ describe("public marketplace indexes", () => {
 function registryReader(files: {
   cursor: unknown[];
   xai?: unknown[] | Error;
+  agent?: unknown[] | Error;
   tree?: string[];
   components?: Record<string, { sha?: string; components: Record<string, unknown[]> }>;
   text?: Record<string, string>;
 }) {
   return vi.fn(async (url: string) => {
+    if (url.endsWith("panpan-m/agent-marketplace/HEAD/marketplace.json")) {
+      if (files.agent instanceof Error) throw files.agent;
+      return index(files.agent ?? []);
+    }
+    if (url.includes("api.github.com/repos/panpan-m/agent-marketplace/git/trees/")) {
+      return JSON.stringify({ tree: [] });
+    }
     if (url.endsWith("xai-org/plugin-marketplace/HEAD/.grok-plugin/marketplace.json")) {
       if (files.xai instanceof Error) throw files.xai;
       return index(files.xai ?? []);
@@ -168,9 +176,9 @@ describe("marketplace service", () => {
     const second = await service.catalog("planning");
     expect(second.entries.map((entry) => entry.name)).toEqual(["Notes", "Tasks"]);
     expect(second.unavailableRegistries).toEqual([]);
-    expect(indexReads(read)).toBe(3);
+    expect(indexReads(read)).toBe(4);
     await service.catalog("no match");
-    expect(indexReads(read)).toBe(3);
+    expect(indexReads(read)).toBe(4);
   });
   it("shares concurrent reads and refreshes an expired catalog in the background", async () => {
     const now = vi.spyOn(Date, "now").mockReturnValue(1000);
@@ -180,11 +188,11 @@ describe("marketplace service", () => {
     });
     const service = createPluginMarketplace(read);
     await Promise.all([service.catalog(""), service.catalog("Notes")]);
-    expect(indexReads(read)).toBe(2);
+    expect(indexReads(read)).toBe(3);
     now.mockReturnValue(1000 + 10 * 60_000 + 1);
     const stale = await service.catalog("");
     expect(stale.entries).toHaveLength(1);
-    await vi.waitFor(() => expect(indexReads(read)).toBe(4));
+    await vi.waitFor(() => expect(indexReads(read)).toBe(6));
   });
   it("reads the title, category and logo of vendored plugins from their manifests", async () => {
     const read = registryReader({
@@ -310,7 +318,7 @@ describe("marketplace service", () => {
     });
     expect(await service.catalog("")).toEqual({
       entries: [],
-      unavailableRegistries: ["Cursor", "xAI"],
+      unavailableRegistries: ["Cursor", "xAI", "Agent Marketplace"],
       skippedEntries: 0,
     });
   });
