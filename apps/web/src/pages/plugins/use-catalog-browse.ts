@@ -41,6 +41,8 @@ export function useCatalogBrowse({
   const [visibleCount, setVisibleCount] = useState(CONNECTION_CATALOG_PAGE_SIZE);
   const [category, setCategory] = useState<string | null>(null);
   const [pluginCount, setPluginCount] = useState(PLUGIN_PAGE_SIZE);
+  const [sheet, setSheet] = useState<"apps" | "skills">("apps");
+  const [skillCount, setSkillCount] = useState(PLUGIN_PAGE_SIZE);
 
   const featuredTiles = useMemo(() => buildFeaturedConnectorTiles(catalog), [catalog]);
   const showFeatured = !query.trim();
@@ -65,17 +67,19 @@ export function useCatalogBrowse({
   });
   // One row per brand: a plugin for a managed app lends that app its skills instead of being
   // listed again. Skill packs with nothing to connect belong to Skills, not here.
-  const { plugins, pluginForApp } = useMemo(() => {
+  const { plugins, pluginForApp, skillPacks } = useMemo(() => {
     const forApp = new Map<string, PluginMarketplaceEntry>();
     const listed: PluginMarketplaceEntry[] = [];
+    const packs: PluginMarketplaceEntry[] = [];
     for (const entry of catalogEntries) {
       const app = managedAppFor(entry, catalog);
       if (app) {
         if (entry.skillCount && !forApp.has(catalogItemKey(app)))
           forApp.set(catalogItemKey(app), entry);
       } else if (entry.hasConnector) listed.push(entry);
+      else if (entry.skillCount) packs.push(entry);
     }
-    return { plugins: listed, pluginForApp: forApp };
+    return { plugins: listed, pluginForApp: forApp, skillPacks: packs };
   }, [catalog, catalogEntries]);
   const categoryLabels: Record<PluginCategory, string> = {
     productivity: t`Productivity`,
@@ -115,6 +119,10 @@ export function useCatalogBrowse({
       matchesPluginQuery(entry, query, entry.category ? categoryLabel(entry.category) : ""),
   );
 
+  const skillMatches = skillPacks.filter((entry) =>
+    matchesPluginQuery(entry, query, entry.category ? categoryLabel(entry.category) : ""),
+  );
+
   return {
     query,
     setQuery,
@@ -124,6 +132,10 @@ export function useCatalogBrowse({
     setCategory,
     pluginCount,
     setPluginCount,
+    sheet,
+    setSheet,
+    skillCount,
+    setSkillCount,
     featuredTiles,
     showFeatured,
     visible,
@@ -134,6 +146,8 @@ export function useCatalogBrowse({
     catalogsReady,
     plugins,
     pluginForApp,
+    skillPacks,
+    skillMatches,
     categoryLabel,
     categories,
     brandMatches,

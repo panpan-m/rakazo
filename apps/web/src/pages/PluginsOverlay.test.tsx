@@ -1,4 +1,6 @@
 // @vitest-environment jsdom
+
+import type { PluginMarketplaceEntry } from "@rakazo/contracts";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 import { act } from "react";
@@ -39,9 +41,43 @@ vi.mock("@lingui/react/macro", () => ({
   }),
 }));
 vi.mock("@rakazo/ui-web", async () => {
-  const { createElement } = await import("react");
+  const { createElement, createContext, useContext, useState } = await import("react");
   const container = ({ children }: { children?: ReactNode }) =>
     createElement("div", null, children);
+  // A minimal tab seam: switching calls onValueChange so controlled tabs follow.
+  const TabsValue = createContext<{ value: string; pick: (value: string) => void } | null>(null);
+  const tabs = ({
+    value,
+    onValueChange,
+    children,
+  }: {
+    value?: string;
+    onValueChange?: (value: string) => void;
+    children?: ReactNode;
+  }) => {
+    const [current, setCurrent] = useState(value ?? "apps");
+    return createElement(
+      TabsValue.Provider,
+      {
+        value: {
+          value: current,
+          pick: (next: string) => {
+            setCurrent(next);
+            onValueChange?.(next);
+          },
+        },
+      },
+      children,
+    );
+  };
+  const tabsTrigger = ({ value, children }: { value?: string; children?: ReactNode }) => {
+    const ctx = useContext(TabsValue);
+    return createElement("button", { onClick: () => ctx?.pick(value ?? "") }, children);
+  };
+  const tabsContent = ({ value, children }: { value?: string; children?: ReactNode }) => {
+    const ctx = useContext(TabsValue);
+    return ctx && ctx.value === value ? createElement("div", null, children) : null;
+  };
   return Object.fromEntries([
     ...[
       "Badge",
@@ -63,7 +99,11 @@ vi.mock("@rakazo/ui-web", async () => {
       "NativeSelectOption",
       "SectionHeading",
       "Spinner",
+      "TabsList",
     ].map((name) => [name, container]),
+    ["Tabs", tabs],
+    ["TabsTrigger", tabsTrigger],
+    ["TabsContent", tabsContent],
     [
       "Button",
       ({
@@ -207,4 +247,55 @@ it("offers the public catalog for a search and sends nothing there until it is p
   expect(host.textContent).toContain("Add MCP server");
   expect(searchBox().value).toBe("canva");
   expect(publicSearches()).toEqual([[{ query: "canva", usePublicCatalog: true }]]);
+});
+
+function marketplaceEntry(entry: {
+  name: string;
+  displayName?: string;
+  hasConnector?: boolean;
+  skillCount?: number;
+}): PluginMarketplaceEntry {
+  return {
+    id: `test:${entry.name}`,
+    name: entry.name,
+    displayName: entry.displayName ?? entry.name,
+    description: "",
+    keywords: [],
+    category: null,
+    logo: null,
+    homepage: null,
+    domains: [],
+    registry: "test",
+    source: `https://github.com/example/${entry.name}`,
+    installedSource: `https://github.com/example/${entry.name}`,
+    hasConnector: entry.hasConnector ?? false,
+    skillCount: entry.skillCount ?? 0,
+  };
+}
+
+it("keeps skill packs on their own sheet, connectors on Apps", async () => {
+  api.marketplace.catalog.mockResolvedValue({
+    entries: [
+      marketplaceEntry({ name: "aave", displayName: "Aave", hasConnector: true }),
+      marketplaceEntry({ name: "pdf", displayName: "Pdf Skills", skillCount: 3 }),
+    ],
+    unavailableRegistries: [],
+  });
+  await act(async () =>
+    root.render(
+      <QueryClientProvider client={client}>
+        <PluginsOverlay onClose={() => {}} />
+      </QueryClientProvider>,
+    ),
+  );
+  await vi.waitFor(() => expect(host.textContent).toContain("Aave"));
+
+  const sheets = [...host.querySelectorAll("button")];
+  const skillsSheet = sheets.find((button) => button.textContent === "Skills");
+  expect(skillsSheet).toBeDefined();
+  expect(host.textContent).not.toContain("Pdf Skills");
+
+  await act(async () => skillsSheet?.click());
+  expect(host.textContent).toContain("Pdf Skills");
+  expect(host.textContent).not.toContain("Aave");
 });
