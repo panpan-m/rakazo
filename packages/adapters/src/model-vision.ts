@@ -134,6 +134,26 @@ export function filterImageReturningComputerTools<T extends { name: string }>(
   return tools.filter((tool) => !IMAGE_RETURNING_COMPUTER_TOOLS.has(tool.name));
 }
 
+/**
+ * Selection-time split of the image-returning tools: observe and act stay usable without
+ * vision when the element tree carries the screen as text, while open_path and launch_app
+ * still need a model that sees. Dispatch applies the same allowance, so an offered tool never
+ * refuses with the cannot-see message and an unoffered one is never reached.
+ */
+export function filterImageReturningComputerToolsForSelection<T extends { name: string }>(
+  tools: T[],
+  computerToolsAllowed: boolean,
+  visionOnlyToolsAllowed: boolean,
+): T[] {
+  return tools.filter((tool) => {
+    if (!IMAGE_RETURNING_COMPUTER_TOOLS.has(tool.name)) return true;
+    if (tool.name === "computer_observe" || tool.name === "computer_act") {
+      return computerToolsAllowed;
+    }
+    return visionOnlyToolsAllowed;
+  });
+}
+
 /** Attachment admission needs proof, unlike conservative screenshot tool gating. */
 export function knownModelImageInput(provider: string, modelId: string): boolean | undefined {
   const resolved = resolveModelRefForVisionCheck(provider, modelId);

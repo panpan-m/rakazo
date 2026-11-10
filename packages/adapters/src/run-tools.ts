@@ -123,7 +123,12 @@ async function dispatchTool(
   if (PAGE_BROWSER_TOOL_NAMES.has(name) && !ctx.computer.pageBrowserAllowed) {
     return { error: "Page browser is unavailable on this computer." };
   }
-  if (IMAGE_RETURNING_COMPUTER_TOOLS.has(name) && !ctx.computer.acceptsImages) {
+  // The element tree carries the screen as text, so those two tools still work without vision.
+  if (
+    IMAGE_RETURNING_COMPUTER_TOOLS.has(name) &&
+    !ctx.computer.acceptsImages &&
+    !(ctx.computer.screenTreeAllowed && (name === "computer_observe" || name === "computer_act"))
+  ) {
     return { error: MODEL_CANNOT_SEE_MESSAGE };
   }
   const request = await resolveToolRequest(ctx, name, args, executionId);

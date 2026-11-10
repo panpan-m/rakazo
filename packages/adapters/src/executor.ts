@@ -1215,7 +1215,9 @@ export function createRunExecutor(executorDeps: ExecutorDeps) {
           deps.runtime.describe().capabilities.scripted ||
           modelSeesImages ||
           Boolean(computerModel || checkpointModelResolver);
-        const graphicalToolsAllowed = graphical && acceptsImages && !heldForTakeover;
+        const screenTreeAllowed = graphical && Boolean(deps.sandbox.screenTree) && !heldForTakeover;
+        const graphicalToolsAllowed =
+          graphical && (acceptsImages || screenTreeAllowed) && !heldForTakeover;
         const pageBrowserAllowed =
           graphical && browser.describe().capabilities.page && !heldForTakeover;
         const disabledBuiltinTools = disabledBuiltinToolSet(bot.disabledBuiltinTools);
@@ -1265,6 +1267,7 @@ export function createRunExecutor(executorDeps: ExecutorDeps) {
             historyRetrievalEnabled: contextStrategy !== "current",
             graphicalToolsAllowed,
             pageBrowserAllowed,
+            acceptsImages,
             groupId: thread.groupId,
             trigger: run.trigger,
             semanticMemoryEnabled,
@@ -1412,7 +1415,11 @@ export function createRunExecutor(executorDeps: ExecutorDeps) {
             pendingTurnCheckpoints: new Map(),
             storedTurnCheckpoint,
           },
-          screen: { lastFrameId: undefined, unchangedVisualStreak: { count: 0 } },
+          screen: {
+            lastFrameId: undefined,
+            unchangedVisualStreak: { count: 0 },
+            treeRows: undefined,
+          },
           toolCallStreak: { key: undefined, count: 0 },
           overLimitActionCalls: 0,
           toolResults: new Map(),
@@ -1486,6 +1493,7 @@ export function createRunExecutor(executorDeps: ExecutorDeps) {
             graphical,
             graphicalToolsAllowed,
             pageBrowserAllowed,
+            screenTreeAllowed,
             acceptsImages,
             heldForTakeover,
           },

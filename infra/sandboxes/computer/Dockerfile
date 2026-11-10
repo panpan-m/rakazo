@@ -74,6 +74,7 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
     fonts-noto-color-emoji \
     locales \
     dbus-x11 \
+    at-spi2-core \
     xdg-desktop-portal \
     xdg-desktop-portal-gtk \
     xdg-utils \
@@ -177,6 +178,17 @@ RUN set -eux; \
 COPY --chmod=755 install-agent-browser.sh /tmp/install-agent-browser.sh
 RUN /tmp/install-agent-browser.sh /usr/local/bin && rm /tmp/install-agent-browser.sh \
   && mkdir -p /usr/local/lib/rakazo
+# The screen-tree driver exposes the desktop's accessibility tree over stdio MCP,
+# pinned and checked by sha256 like agent-browser. at-spi2-core above carries the bus.
+COPY --chmod=755 install-cua-driver.sh /tmp/install-cua-driver.sh
+RUN /tmp/install-cua-driver.sh /usr/local/bin && rm /tmp/install-cua-driver.sh
+COPY --chmod=755 rakazo-tree-driver /usr/local/bin/rakazo-tree-driver
+# Driver state stays out of the persistent home; snapshots are per run, not portable.
+ENV CUA_DRIVER_RS_HOME=/tmp/rakazo/driver-home \
+    CUA_DRIVER_RS_TELEMETRY_ENABLED=0 \
+    CUA_TELEMETRY_ENABLED=0 \
+    CUA_DRIVER_RS_UPDATE_CHECK=0 \
+    CUA_DRIVER_DISABLE_RUN_SCRIPT=1
 ENV DISPLAY=:1
 ENV HOME=/home/rakazo
 # Keep UTF-8 explicit (an empty LANG broke non-ASCII file handling in the
@@ -196,11 +208,15 @@ COPY --chmod=755 control.py /usr/local/bin/rakazo-computer-control
 # Tells the supervisor this control service accepts scrolls aimed at a point and sideways
 # scrolls; it sends those to older images through its fallback instead.
 LABEL rakazo.control.aimedScroll="1"
+# Marks the image as carrying the screen-tree driver and helper, so the supervisor
+# offers element-tree observation only to images that can answer it.
+LABEL rakazo.screen.tree="1"
 COPY --from=capture-builder /build/librakazo-xcapture.so /usr/local/lib/librakazo-xcapture.so
 COPY --chmod=755 rakazo-browser /usr/local/bin/rakazo-browser
 COPY --chmod=755 rakazo-focus-or-launch /usr/local/bin/rakazo-focus-or-launch
 COPY --chmod=755 rakazo-page-browser /usr/local/bin/rakazo-page-browser
 COPY --chmod=644 page_secrets.py /usr/local/lib/rakazo/page_secrets.py
+COPY --chmod=755 screen-tree.py /usr/local/bin/rakazo-screen-tree
 COPY --chmod=644 rakazo-browser.desktop /usr/share/applications/rakazo-browser.desktop
 # Rakazo keeps credentials itself; the browser's save prompts would cover pages.
 # Pop-ups open: one a page opens after making a report would be blocked unseen.
@@ -218,7 +234,7 @@ COPY --chmod=644 mobile-keyboard.js /usr/share/novnc/mobile-keyboard.js
 COPY --chmod=644 rakazo-local-bin.sh /etc/profile.d/rakazo-local-bin.sh
 # Strip CR so shebangs work even if the build context came from a CRLF checkout.
 RUN ldconfig \
-  && sed -i 's/\r$//' /usr/local/bin/rakazo-computer /usr/local/lib/rakazo-user-env.sh /usr/local/bin/rakazo-computer-control /usr/local/bin/rakazo-browser /usr/local/bin/rakazo-focus-or-launch /usr/local/bin/rakazo-page-browser \
+  && sed -i 's/\r$//' /usr/local/bin/rakazo-computer /usr/local/lib/rakazo-user-env.sh /usr/local/bin/rakazo-computer-control /usr/local/bin/rakazo-browser /usr/local/bin/rakazo-focus-or-launch /usr/local/bin/rakazo-page-browser /usr/local/bin/rakazo-screen-tree /usr/local/bin/rakazo-tree-driver \
     /usr/local/lib/rakazo/page_secrets.py \
     /etc/rakazo/fluxbox/init /etc/rakazo/fluxbox/apps /etc/rakazo/fluxbox/menu \
     /etc/profile.d/rakazo-local-bin.sh

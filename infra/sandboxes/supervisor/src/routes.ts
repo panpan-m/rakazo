@@ -683,6 +683,106 @@ app.post("/computers/:id/browser", async (c) => {
   }
 });
 
+const screenTreeElement = z.number().int().min(0).max(100_000);
+const screenTreeRequest = z
+  .object({
+    query: z.string().min(1).max(200).optional(),
+    expectedRows: z.record(z.string().regex(/^\d+$/), z.string().max(2000)).optional(),
+    actions: z
+      .array(
+        z.union([
+          z.object({
+            kind: z.literal("click"),
+            element: screenTreeElement,
+            button: z.enum(["left", "right"]).optional(),
+            double: z.boolean().optional(),
+          }),
+          z.object({
+            kind: z.literal("type"),
+            element: screenTreeElement,
+            text: z.string().min(1).max(10_000),
+          }),
+          z.object({
+            kind: z.literal("set"),
+            element: screenTreeElement,
+            value: z.string().min(1).max(10_000),
+          }),
+          z.object({
+            kind: z.literal("key"),
+            element: screenTreeElement,
+            key: z.string().min(1).max(32),
+            modifiers: z
+              .array(z.enum(["ctrl", "alt", "shift", "meta"]))
+              .max(4)
+              .optional(),
+          }),
+          z.object({
+            kind: z.literal("scroll"),
+            element: screenTreeElement,
+            direction: z.enum(["up", "down", "left", "right"]),
+            amount: z.number().int().min(1).max(20).optional(),
+          }),
+          z.object({ kind: z.literal("wait"), ms: z.number().int().min(0).max(5_000) }),
+        ]),
+      )
+      .min(1)
+      .max(24)
+      .optional(),
+  })
+  .strict();
+
+app.post("/computers/:id/screen-tree", async (c) => {
+  const headers = identityHeaders(c);
+  const signal = c.req.raw.signal;
+  signal.throwIfAborted();
+  const parsed = screenTreeRequest.safeParse(await c.req.json());
+  if (!parsed.success) {
+    return c.json(
+      { ok: false, code: "invalid_screen_tree_request", error: "Invalid screen tree request" },
+      400,
+    );
+  }
+  const body = parsed.data;
+  try {
+    const { container, layout } = await managedScreen(
+      c.req.param("id"),
+      headers.botId,
+      headers.spaceId,
+      headers.screenId,
+      headers.screenLeaseId,
+    );
+    const result = await runContainerCommand(container, ["/usr/local/bin/rakazo-screen-tree"], {
+      env: [
+        `DISPLAY=${layout.display}`,
+        "HOME=/home/rakazo",
+        "PATH=/home/rakazo/.local/bin:/usr/local/sbin:/usr/local/bin:/usr/sbin:/usr/bin:/sbin:/bin",
+      ],
+      timeoutMs: 70_000,
+      signal,
+      stdin: `${JSON.stringify({ display: layout.display, ...body })}\n`,
+    });
+    if (result.code === 2 && Buffer.byteLength(result.stdout) <= 512 * 1024) {
+      const refused = refusedCommand(result.stdout);
+      if (refused) return c.json(refused);
+    }
+    if (
+      result.code !== 0 ||
+      Buffer.byteLength(result.stdout) > 512 * 1024 ||
+      /command timed out/.test(result.stderr)
+    ) {
+      throw new Error(
+        /command timed out/.test(result.stderr)
+          ? "Screen tree timed out; the desktop may be busy. Inspect the screen before continuing."
+          : "Screen tree unavailable",
+      );
+    }
+    return c.json(JSON.parse(result.stdout));
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : String(error);
+    return c.json({ ok: false, code: "screen_tree_unavailable", error: detail });
+  }
+});
+
 app.post("/computers/:id/observe", async (c) => {
   const headers = identityHeaders(c);
   try {

@@ -453,6 +453,11 @@ case "$language" in
     ;;
 esac
 FLAGS="--test-type --no-sandbox --disable-dev-shm-usage --disable-gpu --enable-unsafe-swiftshader $LANGUAGE_FLAGS --no-first-run --no-default-browser-check --disable-session-crashed-bubble --hide-crash-restore-bubble --password-store=basic --restore-last-session --start-maximized --remote-debugging-address=127.0.0.1 --remote-debugging-port=$DEBUG_PORT"
+# Element tools read the desktop's accessibility tree; Chromium only publishes
+# one when asked at launch. The managed per-screen launcher sets this too.
+if [ -n "${RAKAZO_SCREEN_TREE:-}" ]; then
+  FLAGS="$FLAGS --force-renderer-accessibility"
+fi
 if [ "$USER_DATA_DIR_SET" -eq 0 ]; then
   exec "$BIN" $FLAGS --user-data-dir="$PROFILE" "$@"
 fi

@@ -158,6 +158,8 @@ export interface EffectState {
 export interface ScreenState {
   lastFrameId: string | undefined;
   unchangedVisualStreak: UnchangedVisualStreak;
+  /** Rows of the element tree the model last observed; undefined until one is read. */
+  treeRows: Map<number, string> | undefined;
 }
 
 /** What one attempt changes while it runs. Every piece shares these objects by reference. */
@@ -223,6 +225,8 @@ export interface RunComputerContext {
   graphical: boolean;
   graphicalToolsAllowed: boolean;
   pageBrowserAllowed: boolean;
+  /** Element-tree observation exists on this computer, so desktop tools need no vision. */
+  screenTreeAllowed: boolean;
   acceptsImages: boolean;
   heldForTakeover: boolean;
 }

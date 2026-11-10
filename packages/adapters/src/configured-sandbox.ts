@@ -171,6 +171,7 @@ export async function refreshComputerProvider(sandbox: SandboxProvider) {
 /** Resolve settings per operation; retain only the adapter for each current ciphertext. */
 export class ConfiguredSandbox implements SandboxProvider {
   readonly pageBrowser?: SandboxProvider["pageBrowser"];
+  readonly screenTree?: SandboxProvider["screenTree"];
   private selection: ComputerProviderSelection = { provider: "default", settings: null };
   private selectionLoadedAt = 0;
   private selected?: SandboxProvider;
@@ -212,6 +213,14 @@ export class ConfiguredSandbox implements SandboxProvider {
               fallback: "computer_act",
               error: "Page browser is unavailable on this computer.",
             };
+      };
+    // Element tools follow the same rule: only where the deployment's computers carry them.
+    if (primary.screenTree)
+      this.screenTree = async (computer, request, context) => {
+        const provider = await this.route(computer);
+        return provider.screenTree
+          ? provider.screenTree(computer, request, context)
+          : { ok: false, error: "The screen tree is unavailable on this computer." };
       };
   }
   /** Rereads everything now; a save on this instance calls it so its change applies at once. */

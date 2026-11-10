@@ -7,7 +7,7 @@ import { BACKGROUND_HELPER_TRIGGER, isBackgroundRunTrigger, isOwnerStartedRun } 
 import { builtinAgentTools } from "./builtin-tools.js";
 import { selectCloudAgentTools } from "./cloud-agent-tools-select.js";
 import { selectMemoryTools } from "./memory-tools.js";
-import { filterImageReturningComputerTools } from "./model-vision.js";
+import { filterImageReturningComputerToolsForSelection } from "./model-vision.js";
 import { USER_COMPUTER_SCREEN_TOOLS } from "./run-tools-user-computer.js";
 import {
   filterBuiltinToolsForRun,
@@ -102,6 +102,8 @@ export function selectBuiltinToolsForRun(options: {
   graphicalToolsAllowed: boolean;
   /** Page browser tools need a graphical computer (Chrome), not model vision. */
   pageBrowserAllowed?: boolean;
+  /** Whether the model sees images; open_path and launch_app still need vision. */
+  acceptsImages?: boolean;
   groupId: string | null;
   trigger: string;
   semanticMemoryEnabled: boolean;
@@ -148,7 +150,11 @@ export function selectBuiltinToolsForRun(options: {
       filterBuiltinToolsForRun(
         filterBuiltinToolsForThread(
           filterPageBrowserTools(
-            filterImageReturningComputerTools(builtinAgentTools, options.graphicalToolsAllowed),
+            filterImageReturningComputerToolsForSelection(
+              builtinAgentTools,
+              options.graphicalToolsAllowed,
+              options.acceptsImages === true,
+            ),
             options.pageBrowserAllowed ?? options.graphicalToolsAllowed,
           ),
           options.groupId,

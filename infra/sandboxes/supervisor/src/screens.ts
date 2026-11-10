@@ -19,6 +19,7 @@ import {
   releaseAssignedScreen,
   resetManagedScreensCommand,
   screenRecentlyEnsured,
+  screenTreeDesktopEnv,
   stopExtraScreenCommand,
   teardownReleasedScreen,
 } from "./supervisor-logic.js";
@@ -148,6 +149,9 @@ async function ensureManagedScreenAttempt(
     if (info.State?.StartedAt) computerScreenBoots.set(id, info.State.StartedAt);
   }
   const screenKey = screenId || botId || id;
+  // The screen-tree daemon and the browser's accessibility flag both follow the image's label,
+  // so an older image keeps its plain desktop unchanged.
+  const desktopEnv = screenTreeDesktopEnv(info.Config.Labels);
   if (!assigned.has(screenKey)) {
     const usedIndexes = new Set([...assigned.values()].map((slot) => slot.index));
     const hasFreeIndex = Array.from({ length: teamScreenLimit }, (_, index) => index).some(
@@ -163,7 +167,7 @@ async function ensureManagedScreenAttempt(
             runContainerCommand(container, [
               "bash",
               "-c",
-              stopExtraScreenCommand(evictedIndex, evictedScreenId),
+              stopExtraScreenCommand(evictedIndex, evictedScreenId, desktopEnv),
             ]),
           );
         }
@@ -178,7 +182,7 @@ async function ensureManagedScreenAttempt(
   const ensured = await runContainerCommand(container, [
     "bash",
     "-c",
-    ensureScreenCommand(index, screenKey, viewToken),
+    ensureScreenCommand(index, screenKey, viewToken, desktopEnv),
   ]);
   if (ensured.code !== 0) {
     const browserLog = await runContainerCommand(container, [
@@ -188,7 +192,11 @@ async function ensureManagedScreenAttempt(
     ]).catch(() => ({ stdout: "", stderr: "", code: 1 }));
     releaseAssignedScreen(assigned, screenKey);
     await teardownReleasedScreen(assigned, screenKey, index, () =>
-      runContainerCommand(container, ["bash", "-c", stopExtraScreenCommand(index, screenKey)]),
+      runContainerCommand(container, [
+        "bash",
+        "-c",
+        stopExtraScreenCommand(index, screenKey, desktopEnv),
+      ]),
     );
     if (assigned.size === 0) clearComputerScreenRegistry(computerScreens, computerScreenBoots, id);
     const detail = [ensured.stderr, browserLog.stdout].filter(Boolean).join("\n").trim();

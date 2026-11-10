@@ -8,6 +8,10 @@ import {
   MAX_CONSECUTIVE_UNCHANGED_VISUAL_ACTIONS,
   observationToolResult,
   parseComputerActions,
+  screenTreeFrameId,
+  screenTreeRows,
+  screenTreeToolResult,
+  splitComputerActions,
   unchangedVisualActionBlocked,
   unchangedVisualLoopToolResult,
   unchangedVisualStreakAfterPageBrowser,
@@ -329,5 +333,80 @@ describe("computer tool bridge", () => {
     expect(unchangedVisualStreakAfterPageBrowser(engaged, "browser_act", { ok: false })).toEqual(
       engaged,
     );
+  });
+});
+
+describe("screen tree bridge", () => {
+  it("splits element actions from coordinate actions", () => {
+    const split = splitComputerActions([
+      { kind: "click", element: 16 },
+      { kind: "click", x: 5, y: 9 },
+      { kind: "type", element: 12, text: "hi" },
+      { kind: "set", element: 12, value: "set-me" },
+      { kind: "key", element: 12, key: "Return" },
+      { kind: "scroll", element: 20, direction: "down" },
+      { kind: "wait", ms: 200 },
+    ]);
+    expect(split.element).toEqual([
+      { kind: "click", element: 16 },
+      { kind: "type", element: 12, text: "hi" },
+      { kind: "set", element: 12, value: "set-me" },
+      { kind: "key", element: 12, key: "Return" },
+      { kind: "scroll", element: 20, direction: "down", amount: 3 },
+    ]);
+    expect(split.actions).toEqual([
+      { kind: "click", x: 5, y: 9 },
+      { kind: "wait", ms: 200 },
+    ]);
+  });
+
+  it("rejects element numbers out of range and kinds that cannot take one", () => {
+    expect(() => splitComputerActions([{ kind: "click", element: 100001 }])).toThrow(
+      "element must be an integer between 0 and 100000",
+    );
+    expect(() => splitComputerActions([{ kind: "focus", element: 1 }])).toThrow(
+      "kind focus cannot take an element number",
+    );
+  });
+
+  it("maps tree rows to element numbers", () => {
+    const rows = screenTreeRows(
+      '- [0] frame "New Tab"\n  - [12] entry "Address and search bar"\n no number here\n  - [16] push button "Chromium"',
+    );
+    expect(rows.get(12)).toBe('entry "Address and search bar"');
+    expect(rows.get(16)).toBe('push button "Chromium"');
+    expect(rows.size).toBe(3);
+  });
+
+  it("combines frame and tree identity so either changing breaks the dedup", () => {
+    const same = screenTreeFrameId("frame", "tree");
+    expect(screenTreeFrameId("frame", "tree")).toBe(same);
+    expect(screenTreeFrameId("frame2", "tree")).not.toBe(same);
+    expect(screenTreeFrameId("frame", "tree2")).not.toBe(same);
+  });
+
+  it("renders the tree as text and keeps the image optional", () => {
+    const observation = {
+      frameId: "f1",
+      capturedAt: "2026-11-10T00:00:00.000Z",
+      windowTitle: "New Tab - Chromium",
+      elements: 38,
+      tree: '- [0] frame "New Tab"',
+    };
+    const withImage = screenTreeToolResult(
+      observation,
+      { data: "aGk=", mimeType: "image/png" as const },
+      "computer observed",
+      undefined,
+    );
+    expect(withImage.content).toEqual([
+      { type: "text", text: 'computer observed\nNew Tab - Chromium\n\n- [0] frame "New Tab"' },
+      { type: "image", data: "aGk=", mimeType: "image/png" },
+    ]);
+    const withoutImage = screenTreeToolResult(observation, undefined, "computer observed", "f1");
+    expect(withoutImage.content).toHaveLength(1);
+    const text = withoutImage.content[0];
+    expect(text).toMatchObject({ type: "text" });
+    expect(text?.type === "text" ? text.text : "").toContain("(screen unchanged)");
   });
 });

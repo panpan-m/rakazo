@@ -201,6 +201,59 @@ export interface ComputerActionResult {
   observation?: ComputerObservation;
 }
 
+/** One element-addressed desktop action, from the screen tree the model last observed. */
+export type ScreenTreeAction =
+  | { kind: "click"; element: number; button?: "left" | "right"; double?: boolean }
+  | { kind: "type"; element: number; text: string }
+  | { kind: "set"; element: number; value: string }
+  | {
+      kind: "key";
+      element: number;
+      key: string;
+      modifiers?: ("ctrl" | "alt" | "shift" | "meta")[];
+    }
+  | {
+      kind: "scroll";
+      element: number;
+      direction: "up" | "down" | "left" | "right";
+      amount?: number;
+    }
+  | { kind: "wait"; ms: number };
+
+export interface ScreenTreeRequest {
+  /** Case-insensitive substring projected onto the tree rows. */
+  query?: string;
+  actions?: ScreenTreeAction[];
+  /**
+   * The tree row text the model last saw for each element, keyed by element number. Providers
+   * that re-read before acting verify the row still matches, so a changed screen refuses the
+   * action instead of clicking whatever now sits at that number.
+   */
+  expectedRows?: Record<number, string>;
+}
+
+export interface ScreenTreeActionOutcome {
+  index: number;
+  ok: boolean;
+  note?: string;
+}
+
+export type ScreenTreeResult =
+  | {
+      ok: true;
+      window: { pid: number; windowId: number; title: string };
+      snapshotId?: string;
+      /** Numbered rows: `[N] role "name" …` addresses the element actions take. */
+      tree: string;
+      truncated: boolean;
+      elements?: number;
+      actions?: ScreenTreeActionOutcome[];
+      popupWindowId?: number;
+      /** Why no tree follows: the actions ran, but the screen could not be re-read. */
+      observeError?: string;
+    }
+  | { ok: false; error: string; refusal?: string };
+
 export interface ComputerFileEntry {
   path: string;
   kind: "file" | "dir";
@@ -259,6 +312,8 @@ export interface SandboxCapabilities {
   persistentHome: boolean;
   /** Distinct graphical screens for concurrent Team bots on one computer. */
   multiScreen?: boolean;
+  /** Element-tree observation and element-addressed actions on the leased screen. */
+  screenTree?: boolean;
 }
 
 export interface ConnectorTool {

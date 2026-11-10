@@ -273,13 +273,16 @@ export const builtinAgentTools: ConnectorTool[] = [
   {
     name: "computer_observe",
     description:
-      "Capture the current screen of this bot's computer. Returns frame metadata and an image. Observe before coordinate-based actions and whenever another actor may have changed the desktop.",
-    inputSchema: { type: "object", properties: {} },
+      'Capture the current screen of this bot\'s computer. Returns frame metadata, an image, and when the desktop exposes one its element tree: numbered rows like [12] entry "Address and search bar". Observe before actions and whenever another actor may have changed the desktop. Optional query filters tree rows by substring.',
+    inputSchema: {
+      type: "object",
+      properties: { query: { type: "string", minLength: 1, maxLength: 200 } },
+    },
   },
   {
     name: "computer_act",
     description:
-      "Perform up to 24 ordered desktop actions on this bot's computer and return the resulting screen. Batch only predictable actions; stop before an outcome you need to inspect. Action kinds: click, move, down, up, type, key, scroll, wait, focus (raises the application's window, launching it if absent). Scroll turns the wheel at x,y; put them on the area to scroll, as for a click. Without them it scrolls wherever the pointer is. Direction up, down, left or right; amount 1-20 wheel notches, default 3.",
+      "Perform up to 24 ordered desktop actions on this bot's computer and return the resulting screen. Batch only predictable actions; stop before an outcome you need to inspect. Action kinds: click, move, down, up, type, key, scroll, wait, focus (raises the application's window, launching it if absent), set (replaces a text field's value). Scroll turns the wheel at x,y; put them on the area to scroll, as for a click. Without them it scrolls wherever the pointer is. Direction up, down, left or right; amount 1-20 wheel notches, default 3. When the last computer_observe returned element rows, click, type, set, key and scroll may instead carry element: the number in brackets, which addresses that element even if it moved. Do not mix element actions with coordinate actions in one call.",
     inputSchema: {
       type: "object",
       properties: {
@@ -301,18 +304,20 @@ export const builtinAgentTools: ConnectorTool[] = [
                 properties: {
                   kind: {
                     type: "string",
-                    enum: ["click", "move", "down", "up", "type", "key", "scroll", "wait"],
+                    enum: ["click", "move", "down", "up", "type", "key", "scroll", "wait", "set"],
                   },
                   x: { type: "number" },
                   y: { type: "number" },
                   button: { type: "string", enum: ["left", "right"] },
                   double: { type: "boolean" },
                   text: { type: "string" },
+                  value: { type: "string" },
                   key: { type: "string" },
                   modifiers: { type: "array", items: { type: "string" } },
                   direction: { type: "string", enum: ["up", "down", "left", "right"] },
                   amount: { type: "number" },
                   ms: { type: "number" },
+                  element: { type: "number" },
                   application: { type: "string" },
                   uri: { type: "string" },
                 },

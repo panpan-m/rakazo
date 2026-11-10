@@ -565,6 +565,16 @@ export function containerActionStep(
 /** Image label of computers whose control service takes aimed and sideways scrolls. */
 export const AIMED_SCROLL_CONTROL_LABEL = "rakazo.control.aimedScroll";
 
+/** Image label of computers that carry the screen-tree driver and helper. */
+export const SCREEN_TREE_LABEL = "rakazo.screen.tree";
+
+/** Desktop environment for computers whose image carries the screen-tree driver. */
+export function screenTreeDesktopEnv(labels: Record<string, string> | undefined) {
+  return labels?.[SCREEN_TREE_LABEL] === "1"
+    ? { ...DOCKER_DESKTOP_ENV, screenTree: true }
+    : DOCKER_DESKTOP_ENV;
+}
+
 /**
  * Whether a computer's control service can run these actions. One built before aimed and
  * sideways scrolls refuses them mid-batch, after earlier steps have run, so such a batch goes

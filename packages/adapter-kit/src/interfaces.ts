@@ -67,6 +67,8 @@ import type {
   SandboxCapabilities,
   ScreenRequest,
   ScreenSession,
+  ScreenTreeRequest,
+  ScreenTreeResult,
   SecretChangeListener,
   SecretContext,
   SecretPutOptions,
@@ -123,6 +125,16 @@ export interface SandboxProvider {
     request: PageBrowserCommand,
     context: AdapterContext,
   ): Promise<PageBrowserResult>;
+  /**
+   * Optional element-tree view of the same leased screen as observe/act. One call reads the
+   * active window's accessibility tree and may act on its element numbers; refusing carries
+   * an error the model can act on.
+   */
+  screenTree?(
+    computer: ComputerRef,
+    request: ScreenTreeRequest,
+    context: AdapterContext,
+  ): Promise<ScreenTreeResult>;
   /** Allocate or reconnect the computer, returning its reference before fallible setup. */
   provision(
     request: {

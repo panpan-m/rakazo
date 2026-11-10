@@ -25,6 +25,8 @@ export interface DesktopEnvironment {
   preservePrimaryDisplay?: boolean;
   portStart?: number;
   bindHost?: string;
+  /** The desktop's browser keeps an accessibility tree so element tools can read it. */
+  screenTree?: boolean;
 }
 export const DEFAULT_DESKTOP_ENV: DesktopEnvironment = {
   homeDir: "/home/rakazo",
@@ -185,6 +187,54 @@ export function browserLauncherPath(displayNumber: number | string) {
   return `/tmp/rakazo/browser-launch-${displayNumber}`;
 }
 
+/**
+ * The screen-tree daemon keeps one persistent accessibility registration per display. Chromium
+ * decides whether to publish its tree when it starts, so this must be listening before the
+ * browser launches; it is idempotent and a no-op on images without the daemon command.
+ */
+function screenTreeDaemonStart(
+  layout: { display: string; displayNumber: number | string },
+  env: DesktopEnvironment,
+) {
+  const socket = `/tmp/rakazo/screen-tree-${layout.displayNumber}.sock`;
+  const pidFile = `/tmp/rakazo/screen-tree-${layout.displayNumber}.pid`;
+  const log = `/tmp/rakazo/screen-tree-${layout.displayNumber}.log`;
+  const serve = [
+    ". /tmp/rakazo/dbus-session 2>/dev/null || :",
+    `export DISPLAY=${layout.display} HOME=${shellQuote(env.homeDir)}`,
+    `exec rakazo-tree-driver --socket ${socket} --pid-file ${pidFile} --no-overlay --no-permissions-gate`,
+  ].join("; ");
+  return [
+    "if command -v rakazo-tree-driver >/dev/null 2>&1; then",
+    `  tree_pid="$(cat ${pidFile} 2>/dev/null || true)"`,
+    // A pid file alone proves nothing: the pid may have been reused. The daemon's
+    // cmdline names its socket, and a stale socket file without a live daemon is removed.
+    `  if ! { [ -n "$tree_pid" ] && kill -0 "$tree_pid" 2>/dev/null && grep -qa ${shellQuote(socket)} "/proc/$tree_pid/cmdline" 2>/dev/null; }; then`,
+    `    rm -f ${socket} ${pidFile}`,
+    `    RAKAZO_TREE_DRIVER_HOME=/tmp/rakazo/screen-tree-home-${layout.displayNumber} nohup sh -c ${shellQuote(serve)} >${log} 2>&1 </dev/null &`,
+    "  fi",
+    `  for i in $(seq 1 50); do [ -S ${socket} ] && break; sleep 0.1; done`,
+    "fi",
+  ];
+}
+
+/** Stop the display's screen-tree daemon; the next ensure starts a fresh one. */
+function screenTreeDaemonStop(layout: { displayNumber: number | string }) {
+  const socket = `/tmp/rakazo/screen-tree-${layout.displayNumber}.sock`;
+  const pidFile = `/tmp/rakazo/screen-tree-${layout.displayNumber}.pid`;
+  const serve = quoteLayout(`[s]erve --socket ${socket}`);
+  return [
+    `tree_pid="$(cat ${pidFile} 2>/dev/null || true)"`,
+    '[ -z "$tree_pid" ] || kill "$tree_pid" 2>/dev/null || true',
+    // The daemon execs past its wrapper, so match the serve line its cmdline keeps. Wait
+    // out a graceful stop, then force it, the way screen transports are torn down.
+    `pkill -f ${serve} || true`,
+    `for i in $(seq 1 20); do pgrep -f ${serve} >/dev/null || break; sleep 0.1; done`,
+    `pkill -KILL -f ${serve} || true`,
+    `rm -f ${socket} ${pidFile}`,
+  ];
+}
+
 function browserLauncherCommand(
   index: number | undefined,
   screenId: string,
@@ -225,7 +275,7 @@ function browserLauncherCommand(
     '  if [ -n "$_kept" ]; then export LD_PRELOAD="$_kept"; else unset LD_PRELOAD; fi',
     "  unset _kept _rest _entry",
     "fi",
-    `exec "$browser" --test-type --no-sandbox --disable-dev-shm-usage --disable-gpu --enable-unsafe-swiftshader --no-first-run --no-default-browser-check --disable-session-crashed-bubble --hide-crash-restore-bubble --password-store=basic --restore-last-session --start-maximized --remote-debugging-address=127.0.0.1 --remote-debugging-port=${layout.debugPort} --user-data-dir=${shellQuote(browserProfilePathForScreen(screenId, env))} "$@"`,
+    `exec "$browser" --test-type --no-sandbox --disable-dev-shm-usage --disable-gpu --enable-unsafe-swiftshader${env.screenTree ? " --force-renderer-accessibility" : ""} --no-first-run --no-default-browser-check --disable-session-crashed-bubble --hide-crash-restore-bubble --password-store=basic --restore-last-session --start-maximized --remote-debugging-address=127.0.0.1 --remote-debugging-port=${layout.debugPort} --user-data-dir=${shellQuote(browserProfilePathForScreen(screenId, env))} "$@"`,
   ].join("\n");
 }
 
@@ -511,6 +561,7 @@ function renderStopExtraScreenCommand(
     // Stop every client before touching browser state or recycling the display.
     renderStopScreenTransportsCommand(index, env),
     stopBrowserCommand(screenId, env),
+    ...(env.screenTree ? screenTreeDaemonStop(layout) : []),
     `rm -f /tmp/rakazo/browser-profile-${layout.displayNumber} ${browserLauncherPath(layout.displayNumber)}`,
     ...(index === 0 && env.preservePrimaryDisplay
       ? []
@@ -606,6 +657,7 @@ function renderEnsureScreenCommand(
     ...setupDisplay,
     `xdpyinfo -display ${layout.display} >/dev/null 2>&1 || { echo 'computer display is not running' >&2; exit 1; }`,
     `mkdir -p /tmp/rakazo ${shellQuote(path.posix.dirname(profile))}`,
+    ...(env.screenTree ? screenTreeDaemonStart(layout, env) : []),
     ...browserRunningFunction(profile, pidFile),
     `printf %s ${shellQuote(profile)} >/tmp/rakazo/browser-profile-${layout.displayNumber}`,
     "launch_browser() {",

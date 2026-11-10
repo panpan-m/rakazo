@@ -1,0 +1,7 @@
+#!/bin/sh
+# The screen-tree daemon wrapper: the shared runtime knows this neutral command name,
+# and only the image layer names the binary and its environment.
+set -eu
+CUA_DRIVER_RS_HOME="${RAKAZO_TREE_DRIVER_HOME:-/tmp/rakazo/driver-home}"
+export CUA_DRIVER_RS_HOME
+exec cua-driver serve "$@"

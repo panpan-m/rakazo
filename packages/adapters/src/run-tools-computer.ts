@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import type { SandboxProvider } from "@rakazo/adapter-kit";
+import type { SandboxProvider, ScreenTreeAction } from "@rakazo/adapter-kit";
 import type { ComputerCommand } from "@rakazo/contracts";
 import { COMPUTER_COMMAND_OUTPUT_MAX_CHARS } from "@rakazo/contracts";
 import { redactSecrets, sandboxCommandTimeoutMs } from "@rakazo/core";
@@ -30,8 +30,14 @@ import {
 import {
   advanceUnchangedVisualGuard,
   computerVisualActionKey,
+  MAX_CONSECUTIVE_UNCHANGED_VISUAL_ACTIONS,
   observationToolResult,
   parseComputerActions,
+  screenTreeFrameId,
+  screenTreeRows,
+  screenTreeToolResult,
+  screenTreeVisualActionKey,
+  splitComputerActions,
   unchangedVisualActionBlocked,
   unchangedVisualLoopToolResult,
   unchangedVisualStreakAfterPageBrowser,
@@ -141,6 +147,103 @@ async function screenBlocked(ctx: RunContext): Promise<string | undefined> {
     return "Teaching is in progress. Stop teaching before using the computer.";
   }
   return undefined;
+}
+
+/** Element-addressed computer_act: the tree the model last observed names the rows to drive. */
+async function computerActElements(
+  ctx: RunContext,
+  call: Parameters<NonNullable<ToolHandlers["computer_act"]>>[1],
+  actions: ScreenTreeAction[],
+) {
+  const { deps, context } = ctx;
+  const { name, args } = call;
+  if (!ctx.computer.screenTreeAllowed || !deps.sandbox.screenTree) {
+    return { error: "Element actions are unavailable on this computer. Use x/y coordinates." };
+  }
+  const rows = ctx.state.screen.treeRows;
+  if (!rows) {
+    return {
+      error: "Observe the screen with computer_observe before using element numbers.",
+    };
+  }
+  const expectedRows: Record<number, string> = {};
+  for (const action of actions) {
+    if (action.kind === "wait") continue;
+    if (action.element === undefined) continue;
+    const row = rows.get(action.element);
+    if (row === undefined) {
+      return {
+        error: `Element [${action.element}] is not in the last observed tree. Observe the screen again, then use a row it prints.`,
+      };
+    }
+    expectedRows[action.element] = row;
+  }
+  const visualActionKey = screenTreeVisualActionKey(actions);
+  const streak = ctx.state.screen.unchangedVisualStreak;
+  if (
+    visualActionKey &&
+    streak.frameId !== undefined &&
+    streak.actionKey === visualActionKey &&
+    streak.count >= MAX_CONSECUTIVE_UNCHANGED_VISUAL_ACTIONS
+  ) {
+    return call.finish(unchangedVisualLoopToolResult(streak));
+  }
+  ctx.computer.checkpoint.markDirty();
+  return computerScreenToolResult(async () => {
+    const computer = await ctx.computer.get("tool", name);
+    const refused = await countPayment(ctx, call);
+    if (refused) return { error: refused };
+    const screenTree = deps.sandbox.screenTree;
+    if (!screenTree) return { error: "Element actions are unavailable on this computer." };
+    const tree = await screenTree(computer, { actions, expectedRows }, context);
+    if (!tree.ok) return { error: tree.error };
+    if (tree.observeError) {
+      // The actions completed; the screen just could not be re-read (a popup that closed
+      // itself, a window mid-transition). Never let the model act on remembered rows now.
+      ctx.state.screen.treeRows = undefined;
+      const completed = tree.actions?.filter((outcome) => outcome.ok).length ?? actions.length;
+      return {
+        ok: true as const,
+        completed,
+        error: `The screen could not be re-read after the actions (${tree.observeError}). Observe again before acting.`,
+      };
+    }
+    ctx.state.screen.treeRows = screenTreeRows(tree.tree);
+    if (args.observe === false) {
+      return { ok: true as const, completed: tree.actions?.length ?? actions.length };
+    }
+    const observation = await deps.sandbox.observe(computer, context);
+    const frameId = screenTreeFrameId(observation.frameId, tree.tree);
+    const guard = advanceUnchangedVisualGuard(streak, frameId, visualActionKey);
+    ctx.state.screen.unchangedVisualStreak = guard.streak;
+    const completed = tree.actions?.filter((outcome) => outcome.ok).length ?? actions.length;
+    const result = screenTreeToolResult(
+      {
+        frameId,
+        capturedAt: observation.capturedAt,
+        width: observation.width,
+        height: observation.height,
+        cursor: observation.cursor,
+        activeWindow: observation.activeWindow,
+        windowTitle: redactSecrets(tree.window.title, ctx.secrets),
+        elements: tree.elements,
+        truncated: tree.truncated,
+        popupWindowId: tree.popupWindowId,
+        tree: tree.tree,
+      },
+      ctx.computer.acceptsImages
+        ? {
+            data: Buffer.from(observation.image).toString("base64"),
+            mimeType: observation.mimeType,
+          }
+        : undefined,
+      `completed ${completed} element action${completed === 1 ? "" : "s"}`,
+      ctx.state.screen.lastFrameId,
+      visualActionKey ? { unchangedVisualCount: guard.streak.count } : undefined,
+    );
+    ctx.state.screen.lastFrameId = frameId;
+    return result;
+  }, call.finish);
 }
 
 /**
@@ -325,21 +428,76 @@ export async function pageBrowserTool(ctx: RunContext, call: ToolCall) {
 export const computerTools: ToolHandlers = {
   async computer_observe(ctx, call) {
     const { deps, context } = ctx;
-    const { name } = call;
+    const { name, args } = call;
     const blocked = await screenBlocked(ctx);
     if (blocked) return { error: blocked };
-    return computerScreenToolResult(async () =>
-      formatObservation(
-        ctx,
-        await deps.sandbox.observe(await ctx.computer.get("tool", name), context),
-      ),
-    );
+    const query =
+      typeof args.query === "string" && args.query.trim() ? args.query.slice(0, 200) : undefined;
+    return computerScreenToolResult(async () => {
+      const computer = await ctx.computer.get("tool", name);
+      // Element trees and screenshots describe the same screen; read both when the tree exists,
+      // so a text-only model still gets the desktop and a vision model gets both views.
+      const screenTree = deps.sandbox.screenTree;
+      if (ctx.computer.screenTreeAllowed && screenTree) {
+        const [observation, tree] = await Promise.all([
+          deps.sandbox.observe(computer, context),
+          screenTree(computer, query ? { query } : {}, context).catch(() => undefined),
+        ]);
+        if (tree?.ok) {
+          ctx.state.screen.treeRows = screenTreeRows(tree.tree);
+          const frameId = screenTreeFrameId(observation.frameId, tree.tree);
+          const guard = advanceUnchangedVisualGuard(
+            ctx.state.screen.unchangedVisualStreak,
+            frameId,
+          );
+          ctx.state.screen.unchangedVisualStreak = guard.streak;
+          const activeWindow = observation.activeWindow;
+          const result = screenTreeToolResult(
+            {
+              frameId,
+              capturedAt: observation.capturedAt,
+              width: observation.width,
+              height: observation.height,
+              cursor: observation.cursor,
+              activeWindow: activeWindow?.title
+                ? { ...activeWindow, title: redactSecrets(activeWindow.title, ctx.secrets) }
+                : activeWindow,
+              windowTitle: redactSecrets(tree.window.title, ctx.secrets),
+              elements: tree.elements,
+              truncated: tree.truncated,
+              popupWindowId: tree.popupWindowId,
+              tree: tree.tree,
+            },
+            ctx.computer.acceptsImages
+              ? {
+                  data: Buffer.from(observation.image).toString("base64"),
+                  mimeType: observation.mimeType,
+                }
+              : undefined,
+            "computer observed",
+            ctx.state.screen.lastFrameId,
+          );
+          ctx.state.screen.lastFrameId = frameId;
+          return result;
+        }
+      }
+      return formatObservation(ctx, await deps.sandbox.observe(computer, context));
+    });
   },
   async computer_act(ctx, call) {
     const { deps, context } = ctx;
     const { name, args } = call;
     const blocked = await screenBlocked(ctx);
     if (blocked) return { error: blocked };
+    const rawActions = Array.isArray(args.actions) ? args.actions : [];
+    const split = splitComputerActions(rawActions);
+    if (split.element.length > 0 && split.actions.length > 0) {
+      return {
+        error:
+          "Do not mix element and coordinate actions in one computer_act call. Send the element actions, then the coordinate actions separately.",
+      };
+    }
+    if (split.element.length > 0) return computerActElements(ctx, call, split.element);
     const actions = parseComputerActions(args.actions);
     const visualActionKey = computerVisualActionKey(actions);
     if (unchangedVisualActionBlocked(ctx.state.screen.unchangedVisualStreak, actions)) {

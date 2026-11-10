@@ -1055,3 +1055,33 @@ describe("shared Linux desktop lifecycle", () => {
     expect(url.searchParams.get("path")).toBe("websockify?_token=provider-key&token=view-key");
   });
 });
+
+describe("screen-tree desktop environment", () => {
+  it("starts the accessibility daemon before the browser and stops it on release", () => {
+    const withTree = { ...env, screenTree: true };
+    const ensured = ensureScreenCommand(0, "bot", "view", withTree);
+    // The daemon owns a persistent registration the browser needs at launch, so its
+    // socket must exist before the launcher runs, and its start must be idempotent.
+    const daemonStart = ensured.indexOf("rakazo-tree-driver --socket");
+    // The launcher file is written earlier; what must follow the daemon is its execution.
+    const browserExec = ensured.indexOf("nohup /tmp/rakazo/browser-launch-");
+    expect(daemonStart).toBeGreaterThan(-1);
+    expect(browserExec).toBeGreaterThan(-1);
+    expect(daemonStart).toBeLessThan(browserExec);
+    expect(ensured).toContain("--no-overlay --no-permissions-gate");
+    expect(ensured).toContain("rakazo-tree-driver --socket");
+    // The browser publishes its tree only when launched with the flag.
+    expect(ensured).toContain("--force-renderer-accessibility");
+
+    const stopped = stopExtraScreenCommand(0, "bot", withTree);
+    // The bracket keeps the pattern from matching its own pkill line.
+    expect(stopped).toMatch(/\[s\]erve --socket \/tmp\/rakazo\/screen-tree-20.sock/);
+  });
+
+  it("leaves plain desktops untouched without the environment option", () => {
+    const ensured = ensureScreenCommand(0, "bot", "view", env);
+    expect(ensured).not.toContain("rakazo-tree-driver");
+    expect(ensured).not.toContain("--force-renderer-accessibility");
+    expect(stopExtraScreenCommand(0, "bot", env)).not.toContain("rakazo-tree-driver");
+  });
+});

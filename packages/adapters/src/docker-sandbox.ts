@@ -14,6 +14,8 @@ import type {
   SandboxProvider,
   ScreenRequest,
   ScreenSession,
+  ScreenTreeRequest,
+  ScreenTreeResult,
   TerminalRequest,
 } from "@rakazo/adapter-kit";
 import { INVALID_BROWSER_REQUEST, SandboxRequestRejectedError } from "@rakazo/adapter-kit";
@@ -120,6 +122,8 @@ export class DockerSandboxProvider implements SandboxProvider {
         takeover: true,
         persistentHome: true,
         multiScreen: true,
+        // An image without the driver answers screen-tree calls with an actionable refusal.
+        screenTree: true,
       },
     };
   }
@@ -260,6 +264,22 @@ export class DockerSandboxProvider implements SandboxProvider {
       throw new Error(`page browser failed: ${res.status}`);
     }
     return readSandboxJson<PageBrowserResult>(res, context.signal, 512 * 1024);
+  }
+
+  async screenTree(
+    computer: ComputerRef,
+    request: ScreenTreeRequest,
+    context: AdapterContext,
+  ): Promise<ScreenTreeResult> {
+    const res = await fetch(this.url(`/computers/${computer.id}/screen-tree`), {
+      method: "POST",
+      headers: { ...this.headers(context, computer.botId), "content-type": "application/json" },
+      body: JSON.stringify(request),
+      redirect: "error",
+      signal: context.signal,
+    });
+    if (!res.ok) throw new Error(`screen tree failed: ${res.status}`);
+    return readSandboxJson<ScreenTreeResult>(res, context.signal, 512 * 1024);
   }
 
   async connectScreen(
