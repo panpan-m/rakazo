@@ -125,6 +125,7 @@ function registryReader(files: {
   cursor: unknown[];
   xai?: unknown[] | Error;
   agent?: unknown[] | Error;
+  agentComponents?: Record<string, { components: Record<string, unknown[]> }>;
   tree?: string[];
   components?: Record<string, { sha?: string; components: Record<string, unknown[]> }>;
   text?: Record<string, string>;
@@ -134,9 +135,8 @@ function registryReader(files: {
       if (files.agent instanceof Error) throw files.agent;
       return index(files.agent ?? []);
     }
-    if (url.includes("api.github.com/repos/panpan-m/agent-marketplace/git/trees/")) {
-      return JSON.stringify({ tree: [] });
-    }
+    if (url.endsWith("panpan-m/agent-marketplace/HEAD/plugin-index.json"))
+      return JSON.stringify({ version: 1, plugins: files.agentComponents ?? {} });
     if (url.endsWith("xai-org/plugin-marketplace/HEAD/.grok-plugin/marketplace.json")) {
       if (files.xai instanceof Error) throw files.xai;
       return index(files.xai ?? []);
@@ -321,5 +321,19 @@ describe("marketplace service", () => {
       unavailableRegistries: ["Cursor", "xAI", "Agent Marketplace"],
       skippedEntries: 0,
     });
+  });
+  it("reads Agent Marketplace parts from its component index, no tree call", async () => {
+    const read = registryReader({
+      cursor: [],
+      agent: [{ name: "pdf", source: { type: "local", path: "./plugins/skill-pdf" } }],
+      agentComponents: { pdf: { components: { skills: [{}] } } },
+    });
+    const { entries } = await createPluginMarketplace(read).catalog("");
+    expect(entries).toMatchObject([{ name: "pdf", skillCount: 1, hasConnector: false }]);
+    expect(
+      read.mock.calls.some(([url]) =>
+        String(url).includes("repos/panpan-m/agent-marketplace/git/trees"),
+      ),
+    ).toBe(false);
   });
 });
