@@ -31,7 +31,7 @@ export function KeyboardShortcutsDialog({
     { label: t`Focus message`, keys: [[mod, "I"]] },
     dictation && { label: t`Dictate`, keys: [[mod, "D"]] },
     { label: t`Chat details`, keys: [[mod, shift, ","]] },
-    { label: t`Connect apps`, keys: [[mod, shift, "M"]] },
+    { label: t`Marketplace`, keys: [[mod, shift, "M"]] },
     host.desktop && { label: t`Go to bot`, keys: [[mod, "1–9"]] },
     {
       label: t`Next or previous bot`,

@@ -8,7 +8,15 @@ import {
   managedAppFor,
   OTHER_PLUGINS,
 } from "@rakazo/core";
-import { Button, SectionHeading, Spinner } from "@rakazo/ui-web";
+import {
+  Button,
+  SectionHeading,
+  Spinner,
+  Tabs,
+  TabsContent,
+  TabsList,
+  TabsTrigger,
+} from "@rakazo/ui-web";
 import { ArrowUpRight, Search } from "lucide-react";
 import type { PluginSelection } from "../../components/integrations/plugin-marketplace";
 import {
@@ -50,6 +58,10 @@ export function PluginBrowse({
     setCategory,
     pluginCount,
     setPluginCount,
+    sheet,
+    setSheet,
+    skillCount,
+    setSkillCount,
     featuredTiles,
     showFeatured,
     visible,
@@ -59,6 +71,8 @@ export function PluginBrowse({
     catalogEntries,
     catalogsReady,
     plugins,
+    skillPacks,
+    skillMatches,
     categoryLabel,
     categories,
     brandMatches,
@@ -218,7 +232,57 @@ export function PluginBrowse({
     );
   }
 
-  return (
+  /** The Skills sheet: standalone skill packs, flat rows, the search applies too. */
+  function renderSkillPacks() {
+    if (pluginCatalog.isPending)
+      return (
+        <div className="grid place-items-center py-8">
+          <Spinner className="size-5 text-muted-foreground" aria-label={t`Loading plugins…`} />
+        </div>
+      );
+    const unavailable =
+      pluginCatalog.error || pluginCatalog.data?.unavailableRegistries.length ? (
+        <div role="alert" className="mb-4 flex items-center gap-3 text-body text-muted-foreground">
+          <Trans>Some plugins could not be loaded.</Trans>
+          <Button variant="outline" size="sm" onClick={() => void pluginCatalog.refetch()}>
+            <Trans>Retry</Trans>
+          </Button>
+        </div>
+      ) : null;
+    const shown = skillMatches.slice(0, skillCount);
+    return (
+      <>
+        {unavailable}
+        {shown.length ? (
+          <div className="grid grid-cols-2 gap-2" data-testid="skill-packs">
+            {shown.map(renderPluginRow)}
+          </div>
+        ) : (
+          <p className="text-muted-foreground/80">
+            {searching ? (
+              <Trans>No skills match your search.</Trans>
+            ) : (
+              <Trans>No skills yet.</Trans>
+            )}
+          </p>
+        )}
+        {skillCount < skillMatches.length ? (
+          <div className="mt-4 flex justify-center">
+            <Button
+              type="button"
+              variant="secondary"
+              size="sm"
+              onClick={() => setSkillCount((count) => count + PLUGIN_PAGE_SIZE)}
+            >
+              <Trans>Show more</Trans>
+            </Button>
+          </div>
+        ) : null}
+      </>
+    );
+  }
+
+  const appsContent = (
     <>
       {catalogLoaded && showFeatured && !category ? (
         <div className="mb-6" data-testid="featured-connectors">
@@ -358,5 +422,23 @@ export function PluginBrowse({
         </div>
       ) : null}
     </>
+  );
+
+  // The sheets wait until the marketplace actually offers skill packs; a browse
+  // with none stays a single list instead of a second, empty sheet.
+  if (pluginCatalog.isPending || !skillPacks.length) return appsContent;
+  return (
+    <Tabs value={sheet} onValueChange={(value) => setSheet(value as "apps" | "skills")}>
+      <TabsList data-testid="marketplace-sheets" className="mb-4">
+        <TabsTrigger value="apps" className="px-3">
+          <Trans>Apps</Trans>
+        </TabsTrigger>
+        <TabsTrigger value="skills" className="px-3">
+          <Trans>Skills</Trans>
+        </TabsTrigger>
+      </TabsList>
+      <TabsContent value="apps">{appsContent}</TabsContent>
+      <TabsContent value="skills">{renderSkillPacks()}</TabsContent>
+    </Tabs>
   );
 }
